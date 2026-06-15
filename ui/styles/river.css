@@ -1,0 +1,4 @@
+:root { --river-black: #070604; --river-panel: #12100b; --river-gold: #d8a93b; --river-muted: #b9a875; --river-blue: #6ca8d8; --river-danger: #b84a3c; }
+body { background: var(--river-black); color: #f4ead2; }
+.river-card { background: linear-gradient(180deg, rgba(216,169,59,.12), rgba(18,16,11,.96)); border: 1px solid rgba(216,169,59,.38); border-radius: 16px; }
+.river-pill { border: 1px solid rgba(216,169,59,.45); color: var(--river-gold); padding: .2rem .55rem; border-radius: 999px; }
