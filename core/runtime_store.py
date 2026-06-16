@@ -13,6 +13,8 @@ class RuntimeStore:
         self.review_blocks_by_id: dict[str, dict[str, Any]] = {}
         self.action_plans: dict[str, Any] = {}
         self.decisions: dict[str, Any] = {}
+        self.recipes_by_path: dict[str, list[dict[str, Any]]] = {}
+        self.storyboards: dict[str, Any] = {}
         self.last_warnings: list[str] = []
         self.last_errors: list[str] = []
 
@@ -55,6 +57,32 @@ class RuntimeStore:
         with self._lock: self.action_plans[plan.plan_id] = plan
         return plan
 
+    def put_recipe_candidates(self, path: str, recipes):
+        plain = self._plain(recipes)
+        with self._lock: self.recipes_by_path[path] = plain
+        return plain
+
+    def get_recipe_candidates(self, path: str):
+        with self._lock: return self.recipes_by_path.get(path, [])
+
+    def put_storyboard(self, storyboard):
+        storyboard_id = getattr(storyboard, "storyboard_id", None) or storyboard.get("storyboard_id")
+        with self._lock: self.storyboards[storyboard_id] = storyboard
+        return storyboard
+
+    def get_storyboard(self, storyboard_id: str):
+        with self._lock: return self.storyboards.get(storyboard_id)
+
+    def link_storyboard_to_action_plan(self, storyboard_id: str, plan_id: str):
+        with self._lock:
+            story = self.storyboards.get(storyboard_id)
+            if story is None: return None
+            if hasattr(story, "linked_action_plan_id"):
+                story.linked_action_plan_id = plan_id
+            elif isinstance(story, dict):
+                story["linked_action_plan_id"] = plan_id
+            return story
+
     def get_action_plan(self, plan_id: str):
         with self._lock: return self.action_plans.get(plan_id)
 
@@ -76,6 +104,6 @@ class RuntimeStore:
 
     def status(self):
         with self._lock:
-            return {"scans": len(self.scans_by_path), "folderbrains": len(self.folderbrains), "review_blocks": len(self.review_blocks_by_id), "action_plans": len(self.action_plans), "decisions": len(self.decisions), "warnings": self.last_warnings, "errors": self.last_errors}
+            return {"scans": len(self.scans_by_path), "folderbrains": len(self.folderbrains), "review_blocks": len(self.review_blocks_by_id), "action_plans": len(self.action_plans), "decisions": len(self.decisions), "recipes": sum(len(v) for v in self.recipes_by_path.values()), "storyboards": len(self.storyboards), "warnings": self.last_warnings, "errors": self.last_errors}
 
 runtime_store = RuntimeStore()

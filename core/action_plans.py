@@ -24,8 +24,15 @@ def steps_for_decision(block: ReviewBlock, action: str, folder_path: str, payloa
         steps.append(ActionStep("zip_backup", source=folder_path, destination=str(Path(folder_path) / "_river_backup.zip"), reason="Approved zip backup", risk="low"))
     elif action in {"archive_extra_copy", "archive_empty", "archive_residue", "archive_review"}:
         for item in payload.get("items", block.items or []):
-            source = item.get("path") or item.get("source")
-            if source: steps.append(ActionStep("archive", source=source, destination=_archive_destination(source), reason=f"Approved {action} from {block.block_id}", risk="medium"))
+            sources = []
+            if isinstance(item, dict) and item.get("files"):
+                # Duplicate groups keep the first file as representative and propose archiving extras.
+                sources.extend(f.get("path") for f in item.get("files", [])[1:] if isinstance(f, dict) and f.get("path"))
+            else:
+                source = item.get("path") or item.get("source") if isinstance(item, dict) else None
+                if source: sources.append(source)
+            for source in sources:
+                steps.append(ActionStep("archive", source=source, destination=_archive_destination(source), reason=f"Approved {action} from {block.block_id}", risk="medium"))
     elif action in {"preview_names", "approve_rename_plan"}:
         for item in payload.get("items", block.items or []):
             source = item.get("path"); proposed = item.get("proposed_name")

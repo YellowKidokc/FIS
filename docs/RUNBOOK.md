@@ -63,6 +63,18 @@ python -m pytest -q
 python -m compileall app core engines learning scripts workers tests
 ```
 
+## Story / Recipe Mode
+
+Recipe endpoints:
+
+- `GET /api/recipes?path=...` returns ranked guided actions.
+- `GET /api/recipes/next?path=...` returns the recommended next action.
+- `POST /api/storyboard/build` creates a readable storyboard and links a dry-run plan when appropriate.
+- `GET /api/storyboard?id=...` returns a stored storyboard.
+- `POST /api/storyboard/decision` records approve/edit/skip/defer without executing files.
+
+Simple Mode now includes a small Story Mode shell that keeps the black/gold River look and lets a user ask for the next recipe before the later visual polish pass.
+
 ## Currently executable low-risk operations
 
 - `create_folder`

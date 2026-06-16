@@ -13,6 +13,7 @@ from app.routes.preference_routes import ENDPOINTS as PREFERENCE_ENDPOINTS
 from app.routes.rename_routes import ENDPOINTS as RENAME_ENDPOINTS
 from app.routes.review_routes import ENDPOINTS as REVIEW_ENDPOINTS
 from app.routes.scan_routes import ENDPOINTS as SCAN_ENDPOINTS
+from app.routes.story_routes import ENDPOINTS as STORY_ENDPOINTS
 
 ROUTE_CONTRACTS = {
     **ACTION_ENDPOINTS,
@@ -22,6 +23,7 @@ ROUTE_CONTRACTS = {
     **RENAME_ENDPOINTS,
     **REVIEW_ENDPOINTS,
     **SCAN_ENDPOINTS,
+    **STORY_ENDPOINTS,
 }
 
 def is_declared_route(method: str, path: str) -> bool:

@@ -9,6 +9,8 @@ from core.action_plans import create_plan, approve_plan, executable_copy
 from core.executor import preview_plan, execute_plan
 from core.safety import check_plan
 from core.runtime_store import runtime_store
+from core.recipes import build_recipe_candidates, to_dict as recipe_to_dict
+from core.storyboards import build_storyboard, to_dict as storyboard_to_dict
 
 ROOT = Path(__file__).resolve().parents[1]
 UI_DIR = ROOT / "ui"
@@ -54,6 +56,13 @@ class RiverHandler(BaseHTTPRequestHandler):
             return envelope(None, False, result.get("warnings", []), [result["error"]])
         runtime_store.put_scan(path, result)
         return envelope(result, True, result.get("warnings", []), [])
+    def _scan_result(self, path: str):
+        return runtime_store.get_scan(path) or self._scan(path)["data"]
+    def _recipes(self, path: str, intent: str | None = None):
+        result = self._scan_result(path)
+        recipes = build_recipe_candidates(result, path, intent)
+        runtime_store.put_recipe_candidates(path, recipes)
+        return recipes, result
     def _serve_static(self, parsed):
         req = unquote(parsed.path)
         if req in {"/", ""}: target = UI_DIR / "index.html"
@@ -81,6 +90,17 @@ class RiverHandler(BaseHTTPRequestHandler):
                 result = runtime_store.get_scan(path) or self._scan(path)["data"]
                 data = {"blocks": result.get("review_blocks", []), "findings": result.get("findings", [])}
                 return _send_json(self, envelope(data, True, result.get("warnings", []), []))
+            if parsed.path == "/api/recipes":
+                if not path: return _send_json(self, envelope(None, False, [], ["path is required"]), 400)
+                recipes, result = self._recipes(path, qs.get("intent", [""])[0])
+                return _send_json(self, envelope([recipe_to_dict(r) for r in recipes], True, result.get("warnings", []), []))
+            if parsed.path == "/api/recipes/next":
+                if not path: return _send_json(self, envelope(None, False, [], ["path is required"]), 400)
+                recipes, result = self._recipes(path, qs.get("intent", [""])[0])
+                return _send_json(self, envelope(recipe_to_dict(recipes[0]) if recipes else None, True, result.get("warnings", []), []))
+            if parsed.path == "/api/storyboard":
+                story = runtime_store.get_storyboard(qs.get("id", [""])[0])
+                return _send_json(self, envelope(storyboard_to_dict(story) if story and hasattr(story, "storyboard_id") else story, bool(story), [], [] if story else ["storyboard not found"]), 200 if story else 404)
             if parsed.path == "/api/review/block":
                 block = runtime_store.get_review_block(qs.get("id", [""])[0])
                 return _send_json(self, envelope(block, bool(block), [], [] if block else ["block not found"]), 200 if block else 404)
@@ -115,6 +135,26 @@ class RiverHandler(BaseHTTPRequestHandler):
             if parsed.path in {"/api/review/decide", "/api/review/defer", "/api/review/protect", "/api/preferences/record", "/api/decide", "/api/findings/decide"}:
                 decision = _decision_from_body(body); runtime_store.put_decision(decision)
                 return _send_json(self, envelope(to_dict(decision)))
+            if parsed.path == "/api/storyboard/build":
+                if not path: return _send_json(self, envelope(None, False, [], ["path is required"]), 400)
+                recipes, result = self._recipes(path, body.get("intent"))
+                recipe = next((r for r in recipes if r.recipe_id == body.get("recipe_id") or r.recipe_type == body.get("recipe_type")), recipes[0] if recipes else None)
+                if recipe is None: return _send_json(self, envelope(None, False, [], ["recipe not found"]), 404)
+                storyboard, plan = build_storyboard(recipe, result)
+                runtime_store.put_storyboard(storyboard)
+                if plan is not None:
+                    runtime_store.put_action_plan(plan)
+                    runtime_store.link_storyboard_to_action_plan(storyboard.storyboard_id, plan.plan_id)
+                return _send_json(self, envelope(storyboard_to_dict(storyboard)))
+            if parsed.path == "/api/storyboard/decision":
+                story = runtime_store.get_storyboard(body.get("storyboard_id", ""))
+                if not story: return _send_json(self, envelope(None, False, [], ["storyboard not found"]), 404)
+                decision = DecisionRecord(f"decision_{body.get('storyboard_id')}", getattr(story, "storyboard_id", body.get("storyboard_id", "")), "storyboard", body.get("decision", "defer"), body.get("note", ""), body)
+                runtime_store.put_decision(decision)
+                if hasattr(story, "status"):
+                    story.status = "approved" if body.get("decision") == "approve" else body.get("decision", "defer")
+                    runtime_store.put_storyboard(story)
+                return _send_json(self, envelope({"storyboard": storyboard_to_dict(story) if hasattr(story, "storyboard_id") else story, "decision": to_dict(decision), "executes": False}))
             if parsed.path == "/api/action/plan":
                 block = runtime_store.get_review_block(body.get("block_id", "")) or body.get("block")
                 if not block: return _send_json(self, envelope(None, False, [], ["block not found; run /api/scan or pass block"]), 404)

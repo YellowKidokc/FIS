@@ -96,3 +96,15 @@ def test_folderbrain_write_requires_action_plan_or_explicit_endpoint(api, sample
     plan = body["data"]
     assert status == 200 and plan["steps"][0]["operation"] == "write_folderbrain"
     assert plan["dry_run"] is True and not (sample_folder / ".folderbrain.json").exists()
+
+
+def test_recipes_and_storyboard_endpoints(api, sample_folder):
+    api("POST", "/api/scan", {"path": str(sample_folder)})
+    status, recipes = api("GET", f"/api/recipes?path={sample_folder}")
+    assert status == 200 and recipes["data"]
+    status, next_recipe = api("GET", f"/api/recipes/next?path={sample_folder}")
+    assert status == 200 and next_recipe["data"]["recipe_type"]
+    status, story = api("POST", "/api/storyboard/build", {"path": str(sample_folder), "recipe_id": next_recipe["data"]["recipe_id"]})
+    assert status == 200 and story["data"]["story_steps"] and story["data"]["linked_action_plan_id"]
+    status, decision = api("POST", "/api/storyboard/decision", {"storyboard_id": story["data"]["storyboard_id"], "decision": "approve"})
+    assert status == 200 and decision["data"]["executes"] is False
