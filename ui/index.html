@@ -266,7 +266,7 @@ async function scanFolder(){
   } catch (e) { setUiState('ERROR', e.message); toast(e.message, true); document.getElementById('recommended').innerHTML = renderEmptyState(e.message); }
 }
 function useLatest(){ if (state.path) document.getElementById('folderPath').value = state.path; else toast('No latest folder yet.', true); }
-function renderHome(){ document.getElementById('recommended').innerHTML = state.next ? renderRecipeCard(state.next, true) : renderEmptyState('No recommendation yet.'); document.getElementById('secondary').innerHTML = state.recipes.filter(r=>r && r.recipe_id !== state.next?.recipe_id).slice(0,3).map(r=>renderRecipeCard(r)).join('') || renderEmptyState('No secondary actions.'); }
+function renderHome(){ if (state.next) storeRecipe(state.next); state.recipes.forEach(r => storeRecipe(r)); document.getElementById('recommended').innerHTML = state.next ? renderRecipeCard(state.next, true) : renderEmptyState('No recommendation yet.'); document.getElementById('secondary').innerHTML = state.recipes.filter(r=>r && r.recipe_id !== state.next?.recipe_id).slice(0,3).map(r=>renderRecipeCard(r)).join('') || renderEmptyState('No secondary actions.'); }
 async function renderIntelligence(){
   if (!state.path) return;
   const [brain, blocks] = await Promise.all([apiFetch('/api/folderbrain?path=' + encodeURIComponent(state.path)), apiFetch('/api/review/blocks?path=' + encodeURIComponent(state.path))]);
