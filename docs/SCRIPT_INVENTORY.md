@@ -1,33 +1,74 @@
-# River FIS Script Inventory and Target Architecture
+# River FIS Script Inventory, Migration Status, and UI Contract
 
-This inventory accounts for the active River FIS scripts and bundled reference systems before deeper harvesting. Generated/cache/binary artifacts are excluded from the active refactor.
+## Scaffold audit status
 
-| Current path | Main responsibility | Useful functions/classes | Dangerous functions/classes | Destination module | Decision | Notes |
+| File | Status | Notes |
+|---|---|---|
+| `core/models.py` | complete enough for now | Shared dataclasses plus JSON conversion. |
+| `core/orchestrator.py` | needs continued harvest / now functional | Runs real scan, FolderBrain, advisor engines, warnings, timing. |
+| `core/cache.py` | duplicate of old logic / compatibility adapter | Real `sorter_cache.py` copied for compatibility; not yet fully adapted to new models. |
+| `core/review_blocks.py` | complete enough for now | Groups real findings and adds the required 12 review surfaces. |
+| `core/action_plans.py` | complete enough for now | Builds real dry-run/unapproved steps from decisions. |
+| `core/safety.py` | complete enough for now | Strict execution gate for deletes, protected paths, DBs, overwrites, missing paths. |
+| `core/executor.py` | complete enough for now | Preview + safe executor; unimplemented operations return `not_implemented`. |
+| `engines/inventory.py` | real harvested code | Read-only robust scanner based on old manual/background inventory behavior. |
+| `engines/fingerprint.py` | real harvested code | Content hash, name normalization, text fingerprints from fingerprint/manual references. |
+| `engines/duplicates.py` | real harvested code | Exact hash, same-name/same-size, and near-text duplicate findings only. |
+| `engines/classifier.py` | partially_harvested | Extension/keyword domain classifier from `auto_sort.py` ideas; more rules can be moved later. |
+| `engines/naming.py` | partially_harvested | Uses `naming_engine.py` slug/presets when available and adds rename-candidate rules. |
+| `engines/router.py` | complete enough for now | Review-only route recommendations. |
+| `engines/similarity.py` | partially_harvested | Folder-name similarity findings; deeper cluster logic later. |
+| `engines/folderbrain.py` | real harvested code | Builds schema-like FolderBrain payload without auto-writing. |
+| `learning/preference.py` | duplicate of old logic / compatibility adapter | Lazy wrapper around existing preference engine. |
+| `app/server.py` | compatibility wiring | Real pipeline endpoints plus preview-only wrappers for legacy UI routes. |
+| `app/routes/*.py` | placeholder / stub | Marker modules for future framework split; dispatch currently lives in `app/server.py`. |
+| `ui/index.html`, `ui/simple.html`, `ui/components/*.jsx` | preserved | No redesign this pass; API contract documented below. |
+| `ui/styles/*.css` | complete enough for now | River black/gold helper styles preserved. |
+
+## Source script migration table
+
+| Source path | Useful functions/classes found | Destination module | Migration status | Notes | Tests that cover it |
+|---|---|---|---|---|---|
+| `api_server.py` | HTTP routes, folder composition, cache/rename/manual/hub endpoints | `app/server.py`, `app/routes/*` | partially_harvested | Real scan/review/action endpoints are wired; old UI endpoints have preview-only compatibility wrappers. | `test_api_scan_and_review_blocks` |
+| `sorter_cache.py` | `init_db`, scan/action/decision/FolderBrain cache helpers | `core/cache.py` | partially_harvested | Full file copied as compatibility foundation; orchestrator currently works in memory if cache is unavailable. | compileall |
+| `hub_engines.py` | baseline rename, organizer preview, manual scan/status | `engines/hub_preview.py`, `engines/naming.py`, `engines/inventory.py` | partially_harvested | Preview concepts harvested; destructive execution remains blocked outside executor. | orchestrator/API tests |
+| `preference_engine.py` | `record_decision`, `predict_domain`, stats | `learning/preference.py`, `learning/markov.py` | partially_harvested | Lazy compatibility wrapper; API records preview decisions in memory this pass. | API tests |
+| `fingerprint.py` | content hashes, minhash/text duplicate ideas, text extraction | `engines/fingerprint.py`, `engines/duplicates.py` | partially_harvested | Exact hash, same-name/size, and lightweight text near-duplicate logic are wired. | `test_duplicates_create_findings` |
+| `naming_engine.py` | `NamingEngine`, `slugify`, presets | `engines/naming.py` | partially_harvested | Slug/preset compatibility plus real rename-candidate findings and previews. | `test_naming_creates_rename_candidates` |
+| `auto_sort.py` | keyword classification, domain rules, organize/rename danger refs | `engines/classifier.py`, `engines/router.py` | partially_harvested | Safe classifier/router harvested; direct organize/rename intentionally not imported. | `test_low_confidence_classification_needs_review` |
+| `manual_sort.py` | scan, size formatting, md5 dupes, direct sort/flatten/dedup | `engines/inventory.py`, `engines/duplicates.py`, `core/action_plans.py` | partially_harvested | Safe scan/duplicate ideas harvested; direct file ops remain reference only. | inventory/duplicates/action tests |
+| `chi_classifier.py` | CHI vectors/frontmatter/domain helpers | `engines/domain_chi.py` | archived_reference | Optional lazy module; not default startup. | compileall |
+| `cluster_engine.py` | token features and clustering | `engines/clusters.py`, `engines/similarity.py` | partially_harvested | Similar folder-name findings wired; deeper clustering later. | compileall/orchestrator |
+| `nlp_bridge.py` | lazy model resolver/classifiers/summarizer | `engines/nlp_bridge.py` | archived_reference | Optional no-op analyze unless NLP explicitly enabled later; startup safe. | compileall |
+| `background_inventory.py` | background inventory runner | `workers/inventory_worker.py`, future `scripts/scan_background.py` | partially_harvested | Worker import points at real inventory scanner; not auto-run. | compileall |
+| `background_enrich.py` | summary/enrichment runner | `workers/enrich_worker.py`, future `scripts/enrich_background.py` | partially_harvested | Worker import points at FolderBrain builder; not auto-run. | compileall |
+| `background_inventory_course.py` | course scan runner | `workers/inventory_worker.py` | partially_harvested | Accounted as background reference only. | compileall |
+| `file-sorter-v3.jsx` | React GUI calls scan/stats/decide/nlp | `ui/components/intelligent-mode.jsx` | partially_harvested | Preserved; endpoints have compatibility wrappers. | UI contract review |
+| `file-sorter-gui-v2.jsx` | Legacy/alternate React GUI | `ui/components/review-blocks.jsx` | partially_harvested | Preserved for next GUI pass. | UI contract review |
+| `index.html` | Main active River command-center UI | `ui/index.html` | partially_harvested | Preserved as served entrypoint candidate; backend wrappers added. | UI contract review |
+| `simple.html` | Simple guided UI | `ui/simple.html` | partially_harvested | Preserved; backend wrappers added. | UI contract review |
+| `.sortconfig.yaml` | naming/sort presets | `config/sortconfig.yaml` | partially_harvested | Used by legacy naming engine when available. | compileall |
+| `nameit.py` | naming primitive/reference | `engines/naming.py` | not_started | Kept out of startup due Windows escape parse issue. | none |
+| `file-intelligence-system-master/` | pipeline/api/renamer/watcher/NLP/db references | `_archive/external/` later | archived_reference | Not moved yet; not collected by pytest. | pytest config |
+| `Local-File-Organizer-main/` | file readers and metadata processors | `_archive/external/` later | archived_reference | Not moved yet; not collected by pytest. | pytest config |
+| `Project2Prompt-master/` | scanner/processor/utils/exporter | `scripts/export_project_prompt.py`, `tools/project2prompt/` | partially_harvested | Lightweight safe exporter added. | compileall |
+
+## UI API contract
+
+| UI file | Function/component | Endpoint called | Method | Expected request | Expected response | Backend route status |
 |---|---|---|---|---|---|---|
-| `api_server.py` | HTTP bridge for GUI, scan, cache, rename, NLP, decisions | `folder_composition_scan`, HTTP handlers, template helpers | routes can trigger write operations/templates | `app/server.py`, `app/routes/*` | split | Keep behavior; move business logic into core/engines over time. |
-| `sorter_cache.py` | SQLite cache, inventory, actions, FolderBrain persistence | `init_db`, `scan_inventory`, `folderbrain_summary`, `write_folderbrain`, action/decision helpers | writes SQLite and FolderBrain files | `core/cache.py` | keep/rename | Copied as cache foundation for compatibility. |
-| `hub_engines.py` | Preview adapters for rename, organizer, status, manual scan | `baseline_rename_plan`, `organizer_preview`, `rename_preview`, `manual_scan` | none direct, but previews may be confused with execution | `engines/hub_preview.py`, `engines/naming.py`, `engines/inventory.py` | split | Active adapter wrapper added; harvest into focused engines later. |
-| `preference_engine.py` | Learns approve/reject/override decisions | `record_decision`, `predict_domain`, `get_engine_stats` | writes preference DB | `learning/preference.py`, `learning/markov.py` | keep | Must not execute file operations. |
-| `fingerprint.py` | Text extraction, hashes, minhash duplicate groups | `content_hash`, `build_duplicate_groups`, `find_duplicates`, extractors | reads many files; CLI writes output | `engines/fingerprint.py`, `engines/duplicates.py` | promote/split | Wrapper added; duplicate advisor added with no file operations. |
-| `naming_engine.py` | Slug and rename preview generation | `NamingEngine`, `slugify`, `clean_filename`, `PRESETS` | none direct | `engines/naming.py` | keep | Active engine returns rename findings only. |
-| `auto_sort.py` | Classifies and can organize/rename files | `classify_file`, `classify_directory`, keyword helpers | `organize_files`, `organize_folders`, `rename_in_place` | `engines/classifier.py`, `engines/router.py`, `_archive/old_scripts` | split | Do not preserve direct move/rename in engine path. |
-| `manual_sort.py` | Manual scan/sort/flatten/dedup CLI | `scan_directory`, `find_duplicates`, `md5_hash` | `sort_by_extension`, `flatten_directory`, `dedup` | `engines/inventory.py`, `engines/duplicates.py`, `core/action_plans.py` | split/archive reference | Use as primitive reference only. |
-| `chi_classifier.py` | Optional CHI/domain classification | `classify_chi_factor`, `build_chi_vector`, `generate_frontmatter` | none direct | `engines/domain_chi.py` | optional keep | Lazy optional domain module. |
-| `cluster_engine.py` | Token feature clustering | `cluster_files`, `build_feature_matrix` | none direct | `engines/clusters.py`, `engines/similarity.py` | keep | Wrapper added; similarity engine stubbed. |
-| `nlp_bridge.py` | Optional heavy NLP/CLIP bridge | `get_deberta`, `summarize_with_bart`, `classify_image_with_clip` | model loading can break startup | `engines/nlp_bridge.py` | optional keep | Lazy wrapper only; not imported by server startup. |
-| `background_inventory.py` | Background inventory runner | `main` | can write cache | `scripts/scan_background.py`, `workers/inventory_worker.py` | convert | Worker destination scaffolded. |
-| `background_enrich.py` | Background enrichment | `enrich`, `short_summary`, `main` | writes cache/enrichment | `scripts/enrich_background.py`, `workers/enrich_worker.py` | convert | Worker destination scaffolded. |
-| `background_inventory_course.py` | Course-oriented inventory | `run_course`, `main` | writes cache | `workers/inventory_worker.py` | convert | Not auto-run. |
-| `file-sorter-v3.jsx` | Advanced GUI component | UI actions and scan controls | buttons may imply actions | `ui/components/intelligent-mode.jsx` | preserve | Copied to UI component destination. |
-| `file-sorter-gui-v2.jsx` | GUI component | UI controls | buttons may imply actions | `ui/components/review-blocks.jsx` | preserve | Copied to UI component destination. |
-| `index.html` | Main River UI | black/gold layout | none | `ui/index.html` | preserve | Copied unchanged first pass. |
-| `simple.html` | Simple UI | lightweight GUI | none | `ui/simple.html` | preserve | Copied unchanged first pass. |
-| `.sortconfig.yaml` | Naming/sort config | presets/settings | none | `config/sortconfig.yaml` | keep | Copied when present. |
-| `nameit.py` | Filename helper/reference | naming primitives | unknown parse issue from Windows path escapes | `engines/naming.py` | inspect later | Keep outside startup until cleaned. |
-| `file-intelligence-system-master/` | Older FIS app | `fis/pipeline.py`, `fis/api.py`, `fis/renamer.py`, NLP extractors | watcher/startup services | `_archive/external/` after harvest | harvest then archive | Reference only for this pass. |
-| `Local-File-Organizer-main/` | Older organizer | `file_utils.py`, metadata processors | organizer planning may imply file ops | `_archive/external/` after harvest | harvest then archive | Avoid model-heavy startup deps. |
-| `Project2Prompt-master/` | Project prompt exporter | scanner/processor/utils | clipboard/output side effects | `tools/project2prompt/`, `scripts/export_project_prompt.py` | keep as tool | Lightweight exporter added. |
+| `ui/index.html` | scanner pages | `/api/rename/baseline-plan`, `/api/rename/preview`, `/api/manual/scan`, `/api/organizer/preview` | GET | `path`, `max` query | preview JSON | compatibility wrapper needed / exists |
+| `ui/index.html` | intent form | `/api/intent` | POST | JSON intent payload | structured JSON | compatibility wrapper needed / exists |
+| `ui/index.html` | advanced tools | `/api/fingerprint`, `/api/folders/compare`, `/api/folders/composition` | GET | query params | tool result JSON | compatibility wrapper needed / exists |
+| `ui/index.html` | roots/actions | `/api/roots`, `/api/actions` | GET | optional query | roots/actions JSON | compatibility wrapper needed / exists |
+| `ui/index.html` | cache browser | `/api/cache/files`, `/api/cache/scan`, `/api/cache/folder`, `/api/cache/clusters`, `/api/cache/folderbrain`, `/api/cache/classify` | GET | `root`/`path` query | cache/inventory JSON | compatibility wrapper needed / exists |
+| `ui/index.html` | hub/status/stats | `/api/hub/status`, `/api/cache/status`, `/api/stats` | GET | none | status JSON | exists or compatibility wrapper exists |
+| `ui/index.html` | legacy scan | `/api/scan?path=...&top=...` | GET | query path/top | scan result JSON | exists |
+| `ui/index.html` | decide/nlp | `/api/decide`, `/api/nlp-classify` | POST | decision/files JSON | recorded/preview JSON | compatibility wrapper exists |
+| `ui/simple.html` | guided flows | `/api/cache/summary`, `/api/findings`, `/api/cache/rename-sample`, `/api/cache/scan` | GET | path/root query | summary/findings JSON | exists or compatibility wrapper exists |
+| `ui/simple.html` | create/intent | `/api/create/folder`, `/api/intent` | POST | JSON | preview-only JSON | compatibility wrapper exists |
+| `ui/simple.html` | cache classify/rename/findings | `/api/cache/classify`, `/api/cache/rename-plan`, `/api/cache/findings` | GET | root query | cache JSON | exists or compatibility wrapper exists |
+| `ui/simple.html` | decisions | `/api/findings/decide`, `/api/decide` | POST | decision JSON | recorded JSON | compatibility wrapper exists |
+| `ui/components/intelligent-mode.jsx` | intelligent React mode | `/api/stats`, `/api/scan`, `/api/decide`, `/api/nlp-classify` | GET/POST | path/decision/files | status/scan/record JSON | exists or compatibility wrapper exists |
 
-## Target responsibility map
-
-River FIS now has the first-pass guided spine: scan → FolderBrain → advisor findings → review blocks → dry-run action plan → safety gate → executor-only execution.
+No UI endpoint performs destructive file operations directly in the new server; compatibility wrappers return preview-only structured responses where legacy behavior has not been fully harvested.

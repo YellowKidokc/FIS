@@ -86,7 +86,11 @@ class DecisionRecord:
 
 def to_dict(obj: Any) -> Any:
     if hasattr(obj, "__dataclass_fields__"):
-        return asdict(obj)
+        data = asdict(obj)
+        extra = getattr(obj, "extra", None)
+        if isinstance(extra, dict):
+            data.update(extra)
+        return data
     if isinstance(obj, list):
         return [to_dict(v) for v in obj]
     if isinstance(obj, dict):
