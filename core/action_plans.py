@@ -11,26 +11,36 @@ def _archive_destination(path: str) -> str:
     return str(p.parent / "_river_review_archive" / p.name)
 
 def steps_for_decision(block: ReviewBlock, action: str, folder_path: str, payload: dict | None = None) -> list[ActionStep]:
-    payload = payload or {}
-    steps: list[ActionStep] = []
+    payload = payload or {}; steps: list[ActionStep] = []
     if action == "write_folderbrain":
         steps.append(ActionStep("write_folderbrain", destination=str(Path(folder_path) / ".folderbrain.json"), reason="Write approved FolderBrain metadata", risk="low", metadata={"folderbrain": payload.get("folderbrain", {})}))
+    elif action == "create_missing_folders":
+        for name in payload.get("folders", ["_river_review"]): steps.append(ActionStep("create_folder", destination=str(Path(folder_path) / name), reason="Create approved template folder", risk="low"))
+    elif action == "copy":
+        for item in payload.get("items", block.items or []):
+            src = item.get("path") or item.get("source"); dst = item.get("destination")
+            if src and dst: steps.append(ActionStep("copy", source=src, destination=dst, reason="Approved copy plan", risk="low"))
+    elif action == "zip_backup":
+        steps.append(ActionStep("zip_backup", source=folder_path, destination=str(Path(folder_path) / "_river_backup.zip"), reason="Approved zip backup", risk="low"))
     elif action in {"archive_extra_copy", "archive_empty", "archive_residue", "archive_review"}:
         for item in payload.get("items", block.items or []):
-            source = item.get("path") or item.get("source")
-            if source: steps.append(ActionStep("archive", source=source, destination=_archive_destination(source), reason=f"Approved {action} from {block.block_id}", risk="medium"))
+            sources = []
+            if isinstance(item, dict) and item.get("files"):
+                # Duplicate groups keep the first file as representative and propose archiving extras.
+                sources.extend(f.get("path") for f in item.get("files", [])[1:] if isinstance(f, dict) and f.get("path"))
+            else:
+                source = item.get("path") or item.get("source") if isinstance(item, dict) else None
+                if source: sources.append(source)
+            for source in sources:
+                steps.append(ActionStep("archive", source=source, destination=_archive_destination(source), reason=f"Approved {action} from {block.block_id}", risk="medium"))
     elif action in {"preview_names", "approve_rename_plan"}:
         for item in payload.get("items", block.items or []):
-            source = item.get("path")
-            proposed = item.get("proposed_name")
-            if source and proposed:
-                steps.append(ActionStep("rename", source=source, destination=str(Path(source).with_name(proposed)), reason="Approved rename candidate", risk="medium"))
+            source = item.get("path"); proposed = item.get("proposed_name")
+            if source and proposed: steps.append(ActionStep("rename", source=source, destination=str(Path(source).with_name(proposed)), reason="Approved rename candidate", risk="medium"))
     elif action == "protect_folder":
-        steps.append(ActionStep("protect", source=folder_path, reason="Mark folder protected in River metadata", risk="low"))
-    elif action == "create_hub":
+        steps.append(ActionStep("protect", source=folder_path, reason="Mark folder protected in River runtime metadata", risk="low"))
+    elif action in {"create_hub", "link_hub"}:
         steps.append(ActionStep("link_hub", source=folder_path, destination=str(Path(folder_path) / "_river_hub.md"), reason="Create hub link page after approval", risk="low"))
-    elif action == "create_missing_folders":
-        for name in payload.get("folders", []): steps.append(ActionStep("create_folder", destination=str(Path(folder_path) / name), reason="Create approved template folder", risk="low"))
     return steps
 
 def create_plan(block: ReviewBlock, decision: DecisionRecord | None = None, steps: list[ActionStep] | None = None, action: str | None = None, folder_path: str | None = None, payload: dict | None = None) -> ActionPlan:
@@ -42,4 +52,7 @@ def create_plan(block: ReviewBlock, decision: DecisionRecord | None = None, step
     return ActionPlan(f"plan_{uuid4().hex[:12]}", block.block_id, True, False, normalized, metadata={"decision": getattr(decision, "decision", None), "action": action or getattr(decision, "action", None), "folder_path": folder_path})
 
 def approve_plan(plan: ActionPlan, approved: bool = True) -> ActionPlan:
-    return ActionPlan(plan.plan_id, plan.source_block_id, dry_run=not approved, approved=approved, steps=plan.steps, created_by=plan.created_by, metadata={**plan.metadata, "approved": approved, "explicit_execute": approved})
+    return ActionPlan(plan.plan_id, plan.source_block_id, dry_run=True, approved=approved, steps=plan.steps, created_by=plan.created_by, metadata={**plan.metadata, "approved": approved, "explicit_execute": approved})
+
+def executable_copy(plan: ActionPlan, confirm_execute: bool) -> ActionPlan:
+    return ActionPlan(plan.plan_id, plan.source_block_id, dry_run=False, approved=plan.approved, steps=plan.steps, created_by=plan.created_by, metadata={**plan.metadata, "confirm_execute": confirm_execute, "explicit_execute": bool(confirm_execute)})

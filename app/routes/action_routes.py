@@ -1,5 +1,8 @@
-"""Route module placeholder for the split River FIS API layout.
+"""Action-plan route contract for River FIS."""
 
-The lightweight stdlib HTTP server in app.server owns dispatch for now; these modules mark
-stable destinations for the next Flask/FastAPI pass without mixing business logic into routes.
-"""
+ENDPOINTS = {
+    "POST /api/action/plan": "Create a dry-run, unapproved ActionPlan from a review decision.",
+    "POST /api/action/preview": "Return plan steps and safety result; never mutates files.",
+    "POST /api/action/approve": "Mark a stored plan approved for a later execute call.",
+    "POST /api/action/execute": "Execute only approved, non-dry-run plans that pass safety.",
+}

@@ -1,5 +1,7 @@
-"""Route module placeholder for the split River FIS API layout.
+"""Preference route contract for River FIS."""
 
-The lightweight stdlib HTTP server in app.server owns dispatch for now; these modules mark
-stable destinations for the next Flask/FastAPI pass without mixing business logic into routes.
-"""
+ENDPOINTS = {
+    "POST /api/preferences/record": "Record a user decision/preference without file operations.",
+    "GET /api/stats": "Legacy preference stats/status alias.",
+    "POST /api/decide": "Legacy decision endpoint; preview-only compatibility.",
+}

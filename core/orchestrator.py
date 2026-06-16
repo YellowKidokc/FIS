@@ -4,16 +4,19 @@ from pathlib import Path
 from typing import Any
 from core.models import Finding, to_dict
 from core import review_blocks
-from engines import classifier, clusters, duplicates, folderbrain as folderbrain_engine, inventory, naming, router, similarity
+from engines import classifier, clusters, domain_chi, duplicates, folderbrain as folderbrain_engine, inventory, naming, nlp_bridge, router, similarity
 
-ENGINE_ORDER = [duplicates, naming, classifier, router, similarity, clusters]
+ENGINE_ORDER = [duplicates, naming, classifier, router, similarity, clusters, nlp_bridge, domain_chi]
 
 def _cache_call(cache: Any, name: str, *args):
     try:
         fn = getattr(cache, name, None)
-        if callable(fn): fn(*args)
-    except Exception:
-        pass
+        if callable(fn):
+            fn(*args)
+            return None
+    except Exception as exc:
+        return str(exc)
+    return None
 
 def _inventory_findings(scan: dict[str, Any]) -> list[Finding]:
     findings: list[Finding] = []
@@ -33,18 +36,25 @@ def run_folder_intelligence(folder_path: str, options: dict | None = None) -> di
     if not path.is_dir():
         return {"error": f"Path is not a folder: {folder_path}", "folderbrain": None, "findings": [], "review_blocks": [], "warnings": [], "timing": {}}
     t = time.perf_counter(); scan = inventory.scan(str(path), options); timings["inventory"] = round(time.perf_counter() - t, 4); warnings.extend(scan.get("warnings", []))
-    cache = {"inventory": scan}
-    t = time.perf_counter(); brain = folderbrain_engine.build(str(path), cache, scan); timings["folderbrain"] = round(time.perf_counter() - t, 4)
+    cache = (options or {}).get("cache") if isinstance(options, dict) else None
+    memory_cache = {"inventory": scan}
+    if cache is not None:
+        cache_warning = _cache_call(cache, "store_inventory", scan)
+        if cache_warning: warnings.append(f"cache.store_inventory failed: {cache_warning}")
+    t = time.perf_counter(); brain = folderbrain_engine.build(str(path), memory_cache, scan); timings["folderbrain"] = round(time.perf_counter() - t, 4)
     findings: list[Finding] = _inventory_findings(scan)
     for engine in ENGINE_ORDER:
         t = time.perf_counter()
         try:
-            engine_findings = engine.analyze(brain, cache, options) or []
+            engine_findings = engine.analyze(brain, memory_cache, options) or []
             findings.extend(engine_findings)
         except Exception as exc:
             warnings.append(f"{engine.__name__} failed: {exc}")
         timings[engine.__name__.split('.')[-1]] = round(time.perf_counter() - t, 4)
     brain.findings = [to_dict(f) for f in findings]
+    if cache is not None:
+        cache_warning = _cache_call(cache, "store_findings", brain.findings)
+        if cache_warning: warnings.append(f"cache.store_findings failed: {cache_warning}")
     t = time.perf_counter(); blocks = review_blocks.build(brain, findings); timings["review_blocks"] = round(time.perf_counter() - t, 4)
     timings["total"] = round(time.perf_counter() - started, 4)
     return {"folderbrain": to_dict(brain), "findings": to_dict(findings), "review_blocks": to_dict(blocks), "warnings": warnings, "timing": timings}
