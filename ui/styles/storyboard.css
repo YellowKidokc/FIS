@@ -1,16 +1,6 @@
-.story-mode-shell { margin: 18px auto; max-width: 1180px; padding: 18px; background: #080704; color: #f5ead2; border: 1px solid rgba(216,169,59,.35); border-radius: 18px; }
-.story-hero h2 { color: #d8a93b; margin: 0 0 6px; }
-.story-hero p, .why, .story-safety { color: #cbbf9a; }
-.eyebrow { color: #d8a93b; text-transform: uppercase; letter-spacing: .14em; font-size: .78rem; }
-.story-ask { display: grid; grid-template-columns: 1fr 1fr auto; gap: 10px; margin: 14px 0; }
-.story-ask input { background: #111; color: #f5ead2; border: 1px solid rgba(216,169,59,.35); border-radius: 10px; padding: 10px; }
-.story-ask button, .story-recipe-card button, .story-actions button { background: #d8a93b; color: #090703; border: 0; border-radius: 10px; padding: 10px 12px; font-weight: 700; }
-.story-recipe-card, .storyboard-card { background: #11100b; border: 1px solid rgba(216,169,59,.28); border-radius: 14px; padding: 14px; margin-top: 12px; }
-.story-recipe-card.muted { color: #978b66; }
-.story-pills { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0; }
-.story-pills span { border: 1px solid rgba(216,169,59,.35); border-radius: 999px; padding: 4px 8px; color: #d8a93b; }
-.story-progress { display: grid; gap: 8px; padding-left: 20px; }
-.story-safety { border-left: 3px solid #d8a93b; padding-left: 12px; }
-.story-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
-.story-actions .ghost, .story-recipe-card .ghost { background: transparent; color: #d8a93b; border: 1px solid rgba(216,169,59,.45); }
-.storyboard-card pre { max-height: 260px; overflow: auto; background: #050505; color: #f5ead2; padding: 10px; border-radius: 10px; }
+.storyboard { border: 1px solid rgba(167,139,250,.42); background: #101015; border-radius: 12px; padding: 16px; }
+.progress-rail { display:flex; flex-wrap:wrap; gap:8px; margin:12px 0; }
+.progress-rail span { border:1px solid #383446; border-radius:999px; padding:4px 9px; color:#cfc7ff; font-size:12px; }
+.arrow-row { display:grid; grid-template-columns:1fr auto 1fr; gap:10px; align-items:center; }
+.change-table { width:100%; border-collapse:collapse; font-size:13px; }
+.change-table td,.change-table th { border-bottom:1px solid #2b2d36; padding:7px; text-align:left; }
