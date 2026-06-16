@@ -93,9 +93,9 @@ def test_api_scan_and_review_blocks(sample_folder):
         conn = HTTPConnection("127.0.0.1", server.server_port)
         conn.request("POST", "/api/scan", body=json.dumps({"path": str(sample_folder)}), headers={"Content-Type": "application/json"})
         res = conn.getresponse(); payload = json.loads(res.read())
-        assert res.status == 200 and payload["review_blocks"]
+        assert res.status == 200 and payload["data"]["review_blocks"]
         conn.request("GET", f"/api/review/blocks?path={sample_folder}")
         res = conn.getresponse(); payload = json.loads(res.read())
-        assert res.status == 200 and payload["blocks"]
+        assert res.status == 200 and payload["data"]["blocks"]
     finally:
         server.shutdown(); server.server_close()
