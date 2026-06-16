@@ -1,5 +1,7 @@
-"""Route module placeholder for the split River FIS API layout.
+"""FolderBrain route contract for River FIS."""
 
-The lightweight stdlib HTTP server in app.server owns dispatch for now; these modules mark
-stable destinations for the next Flask/FastAPI pass without mixing business logic into routes.
-"""
+ENDPOINTS = {
+    "GET /api/folderbrain": "Build and return FolderBrain JSON from real scan data.",
+    "GET /api/cache/folderbrain": "Legacy alias for FolderBrain preview.",
+    "POST /api/folderbrain/write": "Create a dry-run write_folderbrain ActionPlan; does not write directly.",
+}

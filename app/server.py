@@ -1,5 +1,6 @@
 from __future__ import annotations
-import json
+import json, mimetypes
+from pathlib import Path
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
@@ -8,6 +9,9 @@ from core.orchestrator import run_folder_intelligence
 from core.action_plans import create_plan, approve_plan, DISABLED_OPERATIONS, ALLOWED_OPERATIONS
 from core.executor import preview_plan, execute_plan
 from core.safety import check_plan
+from core.runtime_store import runtime_store
+from core.recipes import build_recipe_candidates, to_dict as recipe_to_dict
+from core.storyboards import build_storyboard, to_dict as storyboard_to_dict
 
 _LAST = {"plans": {}, "blocks": {}, "results": {}, "decisions": [], "storyboards": {}, "executor_logs": []}
 
@@ -31,7 +35,13 @@ def _send(handler, payload, status=200, raw=False):
         else:
             payload = envelope(payload)
     data = json.dumps(payload, default=str).encode("utf-8")
-    handler.send_response(status); handler.send_header("Content-Type", "application/json"); handler.send_header("Access-Control-Allow-Origin", "*"); handler.send_header("Access-Control-Allow-Headers", "Content-Type"); handler.send_header("Access-Control-Allow-Methods", "GET,POST,OPTIONS"); handler.send_header("Content-Length", str(len(data))); handler.end_headers(); handler.wfile.write(data)
+    handler.send_response(status)
+    handler.send_header("Content-Type", "application/json")
+    handler.send_header("Access-Control-Allow-Origin", "*")
+    handler.send_header("Access-Control-Allow-Headers", "Content-Type")
+    handler.send_header("Access-Control-Allow-Methods", "GET,POST,OPTIONS")
+    handler.send_header("Content-Length", str(len(data)))
+    handler.end_headers(); handler.wfile.write(data)
 
 def _send_file(handler, path: Path):
     data = path.read_bytes(); handler.send_response(200); handler.send_header("Content-Type", "text/html; charset=utf-8"); handler.send_header("Content-Length", str(len(data))); handler.end_headers(); handler.wfile.write(data)
@@ -65,14 +75,33 @@ class RiverHandler(BaseHTTPRequestHandler):
     def do_OPTIONS(self): _send(self, envelope({"options": True}))
     def _body(self):
         length = int(self.headers.get("Content-Length", 0) or 0)
-        return json.loads(self.rfile.read(length) or b"{}") if length else {}
+        if not length: return {}
+        try: return json.loads(self.rfile.read(length) or b"{}")
+        except json.JSONDecodeError as exc: raise ValueError(f"Invalid JSON: {exc}")
     def _path_from(self, qs, body=None): return (body or {}).get("path") or qs.get("path", qs.get("root", [""]))[0]
-    def _run(self, path, options=None):
+    def _scan(self, path: str, options=None):
         result = run_folder_intelligence(path, options)
-        if not result.get("error"):
-            _LAST["results"][path] = result
-            for block in result["review_blocks"]: _LAST["blocks"][block["block_id"]] = block
-        return result
+        if result.get("error"):
+            return envelope(None, False, result.get("warnings", []), [result["error"]])
+        runtime_store.put_scan(path, result)
+        return envelope(result, True, result.get("warnings", []), [])
+    def _scan_result(self, path: str):
+        return runtime_store.get_scan(path) or self._scan(path)["data"]
+    def _recipes(self, path: str, intent: str | None = None):
+        result = self._scan_result(path)
+        recipes = build_recipe_candidates(result, path, intent)
+        runtime_store.put_recipe_candidates(path, recipes)
+        return recipes, result
+    def _serve_static(self, parsed):
+        req = unquote(parsed.path)
+        if req in {"/", ""}: target = UI_DIR / "index.html"
+        else:
+            rel = req.lstrip("/")
+            target = (UI_DIR / rel).resolve() if not rel.startswith("ui/") else (ROOT / rel).resolve()
+            if UI_DIR not in target.parents and target != UI_DIR / "index.html":
+                return False
+        if target.exists() and target.is_file(): _send_file(self, target); return True
+        return False
     def do_GET(self):
         parsed = urlparse(self.path); qs = parse_qs(parsed.query); path = self._path_from(qs)
         if parsed.path == "/": return _send_file(self, Path(__file__).resolve().parents[1] / "ui" / "index.html")
@@ -138,5 +167,7 @@ class RiverHandler(BaseHTTPRequestHandler):
             return _send(self, export_project_prompt(body.get("root", "."), body.get("output", "FIS_PROJECT_CONTEXT.md")))
         return _send(self, {"error": "not found"}, 404)
 
-def run(host="127.0.0.1", port=8450): ThreadingHTTPServer((host, port), RiverHandler).serve_forever()
+def run(host="127.0.0.1", port=8450):
+    print(f"River FIS running at http://{host}:{port}/")
+    ThreadingHTTPServer((host, port), RiverHandler).serve_forever()
 if __name__ == "__main__": run()

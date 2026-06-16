@@ -717,6 +717,7 @@ body {
   .main { padding: 28px 16px 42px; }
 }
 </style>
+<link rel="stylesheet" href="styles/storyboard.css">
 </head>
 <body>
 <div class="topbar">
@@ -2069,6 +2070,63 @@ function render() {
 render();
 loadStats();
 </script>
+
+<script>
+(function(){
+  function storyEl(id){ return document.getElementById(id); }
+  async function riverJson(url, options){
+    const res = await fetch(url, options || {});
+    const body = await res.json();
+    if (!body.ok) throw new Error((body.errors || ["River request failed"]).join("; "));
+    return body.data;
+  }
+  function ensureStoryMode(){
+    if (storyEl("riverStoryMode")) return;
+    const panel = document.createElement("section");
+    panel.id = "riverStoryMode";
+    panel.className = "story-mode-shell";
+    panel.innerHTML = `
+      <div class="story-hero"><div><p class="eyebrow">Simple Mode</p><h2>One folder. One guided action.</h2><p>Ask River for the next safest recipe. Manual Advanced stays available underneath.</p></div></div>
+      <div class="story-ask"><input id="storyPathInput" placeholder="Folder path"/><input id="storyIntentInput" placeholder="Ask River: clean duplicates, fix names, sort by type..."/><button id="storyScanBtn">Recommend next action</button></div>
+      <div id="storyRecipeCard" class="story-recipe-card muted">No recommendation yet.</div>
+      <div id="storyBoardCard" class="storyboard-card"></div>`;
+    document.body.insertBefore(panel, document.body.firstChild);
+    const pathInput = storyEl("pathInput");
+    if (pathInput) storyEl("storyPathInput").value = pathInput.value || "";
+    storyEl("storyScanBtn").addEventListener("click", buildRecommendation);
+  }
+  function recipeHtml(recipe){
+    if (!recipe) return "<p>No recipe found yet.</p>";
+    return `<p class="eyebrow">Recommended Next Action</p><h3>${recipe.title}</h3><p>${recipe.one_sentence}</p><div class="story-pills"><span>confidence ${Math.round(recipe.confidence*100)}%</span><span>risk ${recipe.risk}</span><span>${recipe.primitives.join(" → ")}</span></div><p class="why">${recipe.reason}</p><button id="buildStoryboardBtn">Build Storyboard</button><button id="storySkipBtn" class="ghost">Not now</button>`;
+  }
+  function storyboardHtml(story){
+    if (!story) return "";
+    const steps = (story.story_steps || []).map(s => `<li><b>${s.title}</b> — ${s.sentence}</li>`).join("");
+    const safety = story.safety || {};
+    const blockers = (safety.blockers || []).map(b => `<li>${b}</li>`).join("") || "<li>No blockers in preview.</li>";
+    return `<h3>${story.title}</h3><p>${story.subtitle}</p><ol class="story-progress">${steps}</ol><div class="story-safety"><b>Safety:</b> ${safety.risk || story.risk}<ul>${blockers}</ul></div><div class="story-actions"><button id="storyApproveBtn">Approve plan</button><button class="ghost">Edit plan</button><button class="ghost">Skip</button><button class="ghost">Defer</button></div><details><summary>Technical details</summary><pre>${JSON.stringify(story, null, 2)}</pre></details>`;
+  }
+  async function buildRecommendation(){
+    const path = storyEl("storyPathInput").value.trim();
+    const intent = storyEl("storyIntentInput").value.trim();
+    if (!path) return;
+    const recipe = await riverJson(`/api/recipes/next?path=${encodeURIComponent(path)}&intent=${encodeURIComponent(intent)}`);
+    storyEl("storyRecipeCard").className = "story-recipe-card";
+    storyEl("storyRecipeCard").innerHTML = recipeHtml(recipe);
+    storyEl("buildStoryboardBtn").addEventListener("click", async () => {
+      const story = await riverJson("/api/storyboard/build", {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({path, recipe_id: recipe.recipe_id})});
+      storyEl("storyBoardCard").innerHTML = storyboardHtml(story);
+      const approve = storyEl("storyApproveBtn");
+      if (approve) approve.addEventListener("click", async () => {
+        const decision = await riverJson("/api/storyboard/decision", {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({storyboard_id: story.storyboard_id, decision:"approve"})});
+        approve.textContent = decision.executes === false ? "Approved — execute still requires confirmation" : "Approved";
+      });
+    });
+  }
+  ensureStoryMode();
+})();
+</script>
+
 </body>
 </html>
 

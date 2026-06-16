@@ -1,5 +1,8 @@
-"""Route module placeholder for the split River FIS API layout.
+"""Rename route contract for River FIS."""
 
-The lightweight stdlib HTTP server in app.server owns dispatch for now; these modules mark
-stable destinations for the next Flask/FastAPI pass without mixing business logic into routes.
-"""
+ENDPOINTS = {
+    "GET /api/rename/preview": "Return rename candidate findings/previews only.",
+    "GET /api/rename/baseline-plan": "Legacy baseline plan alias; preview-only.",
+    "GET /api/cache/rename-plan": "Legacy cache rename plan alias; preview-only.",
+    "GET /api/cache/rename-sample": "Legacy rename sample alias; preview-only.",
+}

@@ -16,7 +16,7 @@ def test_safety_blocks_delete():
 
 def test_safety_blocks_unapproved_move():
     p = create_plan(block(), DecisionRecord("d1", "b1", "move", "approved"), [ActionStep("move", "a.txt", "b.txt")])
-    result = check_plan(p)
+    result = check_plan(p, mode="execute")
     assert not result.allowed
     assert "Plan is not approved" in result.blockers
 
