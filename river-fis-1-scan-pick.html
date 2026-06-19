@@ -511,8 +511,8 @@ body {
   <!-- Sort engines top strip -->
   <div class="engines">
     <div class="engine">Manual Sort</div>
-    <div class="engine active">File Intelligence Sort <span class="badge">FIS</span></div>
-    <div class="engine">Advanced Sort</div>
+    <div class="engine active">File Intelligence System <span class="badge">FIS</span></div>
+    <div class="engine">Advanced Workbench</div>
     <div class="engine">File Creation Automation</div>
   </div>
 
@@ -629,19 +629,19 @@ body {
         </div>
         <div class="scan-summary-grid">
           <div class="summary-stat">
-            <div class="summary-stat-num gold">2,968,345</div>
+            <div class="summary-stat-num gold" id="filesScanned">0</div>
             <div class="summary-stat-label">Files Scanned</div>
           </div>
           <div class="summary-stat">
-            <div class="summary-stat-num blue">10,241</div>
+            <div class="summary-stat-num blue" id="duplicateGroups">0</div>
             <div class="summary-stat-label">Duplicate Groups</div>
           </div>
           <div class="summary-stat">
-            <div class="summary-stat-num red">7,639</div>
+            <div class="summary-stat-num red" id="namingAnomalies">0</div>
             <div class="summary-stat-label">Naming Anomalies</div>
           </div>
           <div class="summary-stat">
-            <div class="summary-stat-num green">3,617</div>
+            <div class="summary-stat-num green" id="protectedCount">0</div>
             <div class="summary-stat-label">Protected (skipped)</div>
           </div>
         </div>
@@ -658,14 +658,14 @@ body {
         </div>
         <div class="mode-card recommended">
           <div class="mode-card-icon">◈</div>
-          <h3>River Intelligence</h3>
-          <p>River proposes a complete strategy at each stage. You approve, try another option, or hand off to manual. Up to 3 attempts per stage.</p>
+          <h3>File Intelligence System</h3>
+          <p>Describe intent. FIS proposes safe preview-only plans: Option A, B, C, then Ask FIS before Manual or Advanced.</p>
           <div class="footnote">Best for most cases · guided</div>
         </div>
         <div class="mode-card">
           <div class="mode-card-icon">⚙</div>
-          <h3>Advanced</h3>
-          <p>Every knob exposed. Rule chain editor, hash algorithm choice, protected-list editing, custom keeper logic, live diff.</p>
+          <h3>Advanced Workbench</h3>
+          <p>Build an ordered action stack directly. Every action category and rule option is available, but nothing runs until simulate + approve.</p>
           <div class="footnote">Power-user · full control</div>
         </div>
       </div>
@@ -685,43 +685,55 @@ presets.forEach(p => {
   });
 });
 
-function startScan() {
-  if (!pickerInput.value.trim()) {
-    pickerInput.value = 'C:\\Users\\david\\Downloads';
-  }
+const API_BASE = localStorage.getItem('fisApiBase') || 'http://localhost:8420';
+function fmt(n) { return Number(n || 0).toLocaleString(); }
+function applyScanSummary(scan) {
+  sessionStorage.setItem('fis_scan_id', scan.scan_id);
+  localStorage.setItem('fis_scan_id', scan.scan_id);
+  sessionStorage.setItem('fis_scan_summary', JSON.stringify(scan));
+  document.getElementById('scannedPath').textContent = scan.root;
+  document.getElementById('filesScanned').textContent = fmt(scan.files_scanned);
+  document.getElementById('duplicateGroups').textContent = fmt(scan.duplicate_groups);
+  document.getElementById('namingAnomalies').textContent = fmt(scan.naming_anomalies);
+  document.getElementById('protectedCount').textContent = fmt(scan.protected_count);
+}
+async function startScan() {
+  if (!pickerInput.value.trim()) pickerInput.value = 'C:\\Users\\david\\Downloads';
   document.getElementById('preScan').style.display = 'none';
   document.getElementById('scanProgress').classList.add('active');
   document.getElementById('scannedPath').textContent = pickerInput.value;
   document.getElementById('scanCurrentPath').textContent = pickerInput.value;
-
-  // Simulate scan progress
-  let pct = 0;
   const fill = document.getElementById('progressFill');
-  const interval = setInterval(() => {
-    pct += Math.random() * 12 + 4;
-    if (pct >= 100) {
-      pct = 100;
-      fill.style.width = '100%';
-      clearInterval(interval);
-      setTimeout(() => {
-        document.getElementById('scanProgress').classList.remove('active');
-        document.getElementById('postScan').classList.add('active');
-      }, 400);
-    } else {
-      fill.style.width = pct + '%';
-    }
-  }, 220);
+  fill.style.width = '18%';
+  try {
+    const res = await fetch(`${API_BASE}/api/scan`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({path: pickerInput.value.trim()})});
+    fill.style.width = '88%';
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'scan failed');
+    applyScanSummary(data);
+    fill.style.width = '100%';
+    setTimeout(() => {
+      document.getElementById('scanProgress').classList.remove('active');
+      document.getElementById('postScan').classList.add('active');
+    }, 250);
+  } catch (err) {
+    document.getElementById('scanProgress').classList.remove('active');
+    document.getElementById('preScan').style.display = 'block';
+    alert('Scan failed: ' + err.message);
+  }
 }
 
 // Mode card routing
 document.querySelectorAll('.mode-card').forEach(card => {
   card.addEventListener('click', () => {
     const title = card.querySelector('h3').textContent;
-    if (title.includes('Intelligence')) {
+    if (title.includes('File Intelligence System')) {
       // Would navigate to HTML 2 in production
       window.location.href = 'river-fis-2-intelligence-mode.html';
+    } else if (title.includes('Advanced')) {
+      window.location.href = 'river-fis-3-advanced-mode.html';
     } else {
-      alert(title + ' Mode — not wired in this prototype. Open river-fis-2-intelligence-mode.html for the canonical flow.');
+      alert(title + ' — manual mode is not wired in this preview.');
     }
   });
 });
