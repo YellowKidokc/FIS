@@ -10,6 +10,9 @@ from core.orchestrator import run_folder_intelligence
 from core.action_plans import create_plan, approve_plan, DISABLED_OPERATIONS, ALLOWED_OPERATIONS
 from core.executor import preview_plan, execute_plan
 from core.safety import check_plan
+from core.runtime_store import runtime_store
+from core.recipes import build_recipe_candidates, to_dict as recipe_to_dict
+from core.storyboards import build_storyboard, to_dict as storyboard_to_dict
 
 _LAST = {"plans": {}, "blocks": {}, "results": {}, "decisions": [], "storyboards": {}, "executor_logs": []}
 _LOCK = threading.Lock()
@@ -126,9 +129,11 @@ class RiverHandler(BaseHTTPRequestHandler):
     def do_OPTIONS(self): _send(self, envelope({"options": True}))
     def _body(self):
         length = int(self.headers.get("Content-Length", 0) or 0)
-        return json.loads(self.rfile.read(length) or b"{}") if length else {}
+        if not length: return {}
+        try: return json.loads(self.rfile.read(length) or b"{}")
+        except json.JSONDecodeError as exc: raise ValueError(f"Invalid JSON: {exc}")
     def _path_from(self, qs, body=None): return (body or {}).get("path") or qs.get("path", qs.get("root", [""]))[0]
-    def _run(self, path, options=None):
+    def _scan(self, path: str, options=None):
         result = run_folder_intelligence(path, options)
         if not result.get("error"):
             with _LOCK:
@@ -221,8 +226,7 @@ class RiverHandler(BaseHTTPRequestHandler):
                 _LAST["plans"][plan.plan_id] = plan
             return _send(self, to_dict(plan))
         if parsed.path == "/api/action/preview":
-            plan = _plan_from_dict(body["plan"]) if body.get("plan") else _LAST["plans"].get(body.get("plan_id"))
-            return _send(self, preview_plan(plan) if plan else {"error": "plan not found"}, 200 if plan else 404)
+            plan = _plan_from_dict(body["plan"]) if body.get("plan") else _LAST["plans"].get(body.get("plan_id")); return _send(self, preview_plan(plan) if plan else {"error": "plan not found"}, 200 if plan else 404)
         if parsed.path == "/api/action/approve":
             with _LOCK:
                 plan = _LAST["plans"].get(body.get("plan_id"))
@@ -248,5 +252,7 @@ class RiverHandler(BaseHTTPRequestHandler):
             return _send(self, export_project_prompt(body.get("root", "."), body.get("output", "FIS_PROJECT_CONTEXT.md")))
         return _send(self, {"error": "not found"}, 404)
 
-def run(host="127.0.0.1", port=8450): ThreadingHTTPServer((host, port), RiverHandler).serve_forever()
+def run(host="127.0.0.1", port=8450):
+    print(f"River FIS running at http://{host}:{port}/")
+    ThreadingHTTPServer((host, port), RiverHandler).serve_forever()
 if __name__ == "__main__": run()

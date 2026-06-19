@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>River - File Intelligence System</title>
+<title>Final Intelligence System - File Intelligence System</title>
 <meta name="description" content="Guided file organization with preview-first safety.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -717,11 +717,10 @@ body {
   .main { padding: 28px 16px 42px; }
 }
 </style>
-<link rel="stylesheet" href="styles/storyboard.css">
 </head>
 <body>
 <div class="topbar">
-  <div class="brand">RIVER <span>FIS</span></div>
+  <div class="brand">FINAL INTELLIGENCE <span>FIS</span></div>
   <div class="topnav">
     <a class="mode-link" href="/">Advanced Mode</a>
     <span class="status">API connected</span>
@@ -731,7 +730,7 @@ body {
 <section class="hero">
   <div class="hero-label">File Intelligence System - Simple Mode</div>
   <h1>One folder.<br><span>One guided action.</span></h1>
-  <p class="hero-sub">A reusable event page for file organization: scan the folder, explain what was found, preview the next action, then approve only when it is safe.</p>
+  <p class="hero-sub">A reusable event page for file organization: scan the folder once, build local NLP memory, then preview the next action and approve only when it is safe.</p>
   <div class="flow-pill mono">folder -> preview -> action -> approve -> record</div>
   <div class="quick-links">
     <button class="quick-link" id="heroScanBtn">Scan folder first</button>
@@ -756,7 +755,15 @@ let state = {
   path: DEFAULT_PATH,
   busy: false,
   result: null,
+  scanResult: null,
   message: "",
+  homePhase: "scan",
+  scanStartAt: 0,
+  scanElapsedSeconds: 0,
+  scanTimerId: null,
+  scannedPath: "",
+  postScanPrompt: false,
+  modeSelection: null,
   stats: null,
   rename: { schema: "baseline", seed: 0 },
   decision: { goal: null, action: null, items: [], index: 0, saved: 0, custom: "" },
@@ -808,31 +815,56 @@ const flows = {
 };
 
 const decisionGoals = {
-  clean: {
-    title: "Clean names",
-    desc: "Fix messy names, apply naming schemas, or batch rename.",
+  rename: {
+    title: "Rename files",
+    desc: "Fix messy names with a consistent naming schema.",
     actions: {
       baseline: { title: "Baseline", desc: "lowercase + hyphens" },
       date_schema: { title: "Date schema", desc: "YYYY-MM-DD prefix" },
       domain_schema: { title: "Domain schema", desc: "domain__topic__type" }
     }
   },
-  organize: {
-    title: "Organize",
-    desc: "Combine, split, or connect related files and folders.",
+  combine: {
+    title: "Combine folders",
+    desc: "Merge related folders into one clean project folder.",
     actions: {
-      combine: { title: "Combine", desc: "merge related folders" },
-      separate: { title: "Separate", desc: "split by type, domain, or date" },
-      hub: { title: "Link / Hub", desc: "connect without moving" }
+      combine: { title: "Merge related folders", desc: "merge folders that belong to one project" },
+      hub: { title: "Create hub folder", desc: "point multiple folders to one shared home" }
+    }
+  },
+  split: {
+    title: "Split folders",
+    desc: "Separate mixed folders by type, topic, date, or purpose.",
+    actions: {
+      separate: { title: "Separate by type", desc: "split into narrower groups" },
+      split_by_date: { title: "Split by date", desc: "separate older and newer files" },
+      split_by_topic: { title: "Split by topic", desc: "split by NLP tags or project theme" }
+    }
+  },
+  dedupe: {
+    title: "Deduplicate",
+    desc: "Find duplicated files and pick a safe cleanup path.",
+    actions: {
+      dedupe_filename: { title: "Exact duplicates", desc: "exact filename and content patterns" },
+      dedupe_similar: { title: "Near duplicates", desc: "same project, different versions" }
+    }
+  },
+  create: {
+    title: "Create folders",
+    desc: "Build a new project structure where your files can land.",
+    actions: {
+      create_seed: { title: "Project seed", desc: "create a clean project starter" },
+      create_by_pattern: { title: "Pattern folders", desc: "split by tags, client, year, topic" }
     }
   },
   relocate: {
     title: "Relocate",
-    desc: "Move, archive, or quarantine files safely.",
+    desc: "Move, archive, or quarantine safely.",
     actions: {
-      move: { title: "Move", desc: "put it where it belongs" },
-      archive: { title: "Archive", desc: "remove from active but preserve" },
-      delete_later: { title: "Delete Later", desc: "quarantine with review" }
+      move: { title: "Move", desc: "move to a better active folder" },
+      archive: { title: "Archive", desc: "remove from active workspace" },
+      delete_later: { title: "Delete later", desc: "defer deletion behind review"
+      }
     }
   }
 };
@@ -861,13 +893,118 @@ function fmtBytes(value) {
   return `${size.toFixed(size >= 10 || index === 0 ? 0 : 1)} ${units[index]}`;
 }
 
+function normalizePath(value) {
+  return String(value || "")
+    .trim()
+    .replace(/[/\\]+/g, "\\")
+    .replace(/\\+$/, "")
+    .toLowerCase();
+}
+
+function isScannedForCurrentPath() {
+  const activeResult = state.scanResult || state.result;
+  const scanned = normalizePath(state.scannedPath || activeResult?.scan_path || "");
+  const current = normalizePath(state.path);
+  return Boolean(scanned)
+    && scanned === current
+    && !activeResult?.error
+    && (activeResult?.bootstrap || activeResult?.mode === "inventory");
+}
+
+function ensureScannedForAction(actionLabel) {
+  if (!isScannedForCurrentPath()) {
+    state = {
+      ...state,
+      flow: null,
+      postScanPrompt: false,
+      modeSelection: null,
+      message: actionLabel
+        ? `${actionLabel} is locked until Scan First is complete for the current folder.`
+        : "Scan this folder first before any file action.",
+    };
+    render();
+    return false;
+  }
+  return true;
+}
+
+function clearScanTimer() {
+  if (state.scanTimerId) {
+    clearInterval(state.scanTimerId);
+    state.scanTimerId = null;
+  }
+}
+
+function formatElapsed(seconds) {
+  const safeSeconds = Math.max(0, Number(seconds) || 0);
+  const mins = Math.floor(safeSeconds / 60);
+  const secs = safeSeconds % 60;
+  return `${mins}:${String(secs).padStart(2, "0")}`;
+}
+
 function setFlow(flow) {
+  if (!ensureScannedForAction("Manual, intelligence, rename, or create workflows")) {
+    return;
+  }
+  if (state.homePhase !== "questions") {
+    state = {
+      ...state,
+      flow: null,
+      message: "Complete the setup sequence first: Scan → Statistics → Questions."
+    };
+    render();
+    return;
+  }
   state = { ...state, flow, result: null, message: "" };
+  state.postScanPrompt = false;
+  state.modeSelection = null;
   render();
 }
 
 function goHome() {
-  state = { ...state, flow: null, result: null, message: "" };
+  state = {
+    ...state,
+    flow: null,
+    result: state.scanResult || state.result,
+    homePhase: isScannedForCurrentPath() ? state.homePhase : "scan",
+    message: "",
+    postScanPrompt: false,
+    modeSelection: null
+  };
+  render();
+}
+
+function continueSetup() {
+  if (!ensureScannedForAction("Next stage")) return;
+  state = {
+    ...state,
+    postScanPrompt: "mode",
+    message: "Great. Are you ready to move to the next stage?"
+  };
+  render();
+}
+
+function chooseManualPath() {
+  if (!ensureScannedForAction("Manual setup mode")) return;
+  state = {
+    ...state,
+    homePhase: "questions",
+    postScanPrompt: false,
+    modeSelection: "manual",
+    message: "Great. Use the three-question decision tree to pick your preferred action."
+  };
+  render();
+}
+
+function chooseAdvancedPath() {
+  if (!ensureScannedForAction("Advanced workflow mode")) return;
+  state = {
+    ...state,
+    homePhase: "questions",
+    postScanPrompt: false,
+    modeSelection: "advanced",
+    message: "Advanced workflow unlocked. Pick a flow from the cards below."
+  };
   render();
 }
 
@@ -902,20 +1039,82 @@ async function runFlow() {
 
 async function runPreflightScan() {
   if (!state.path.trim()) return;
-  state = { ...state, flow: null, busy: true, result: null, message: "Building file memory..." };
+  clearScanTimer();
+  const started = Date.now();
+  const targetPath = state.path;
+  state = {
+    ...state,
+    flow: null,
+    busy: true,
+    result: null,
+    scanResult: null,
+    homePhase: "scanning",
+    modeSelection: null,
+    scanStartAt: started,
+    scanElapsedSeconds: 0,
+    message: "Building file memory..."
+  };
+  state.scanTimerId = setInterval(() => {
+    const nextElapsed = Math.floor((Date.now() - started) / 1000);
+    state = {
+      ...state,
+      scanElapsedSeconds: nextElapsed,
+      message: `Building file memory... (${formatElapsed(nextElapsed)} elapsed)`
+    };
+    render();
+  }, 1000);
   render();
   try {
-    const res = await fetch(flows.cache.route(state.path));
-    const data = await res.json();
+    const endpoint = `${API}/api/bootstrap`;
+    const query = new URLSearchParams({
+      path: targetPath,
+      recursive: "true",
+      follow_links: "true",
+      max: "250000",
+      classify: "true",
+      only_unclassified: "true",
+      nlp: "true",
+      classify_max: "250000",
+      preview: "120",
+    });
+      const res = await fetch(`${endpoint}?${query}`);
+      const data = await res.json();
+      let scanSummary = null;
+      if (!data.error) {
+        try {
+          const summaryRes = await fetch(`${API}/api/cache/summary?root=${encodeURIComponent(targetPath)}`);
+          scanSummary = await summaryRes.json();
+        } catch {
+          scanSummary = { error: "Could not load local statistics." };
+        }
+      }
     state = {
       ...state,
       busy: false,
+      scannedPath: data.scan_path || targetPath,
+      postScanPrompt: !data.error,
+      homePhase: data.error ? "scan" : "stats",
+      modeSelection: null,
+      scanElapsedSeconds: data.error ? state.scanElapsedSeconds : Math.floor((Date.now() - started) / 1000),
       result: data,
-      message: data.error ? data.error : "File memory is ready. Starting River classification in the background..."
+      scanResult: data.error ? null : data,
+      stats: scanSummary && !scanSummary.error ? scanSummary : (data.error ? { error: data.error } : data),
+      message: data.error
+        ? data.error
+        : `File memory and NLP pass are ready. ${data.classified ?? 0} files classified, ${data.classify_top_tags?.length ?? 0} top tags found.`
     };
-    if (!data.error) runBackgroundNlpClassify();
   } catch (err) {
-    state = { ...state, busy: false, result: { error: String(err) }, message: "Could not reach the local API." };
+    state = {
+      ...state,
+      busy: false,
+      result: { error: String(err) },
+      scanResult: null,
+      homePhase: "scan",
+      scanElapsedSeconds: Math.floor((Date.now() - started) / 1000),
+      message: "Could not reach the local API."
+    };
+  } finally {
+    clearScanTimer();
   }
   render();
 }
@@ -925,19 +1124,21 @@ async function runBackgroundNlpClassify() {
     const res = await fetch(`${API}/api/cache/classify?root=${encodeURIComponent(state.path)}&limit=300&only_unclassified=true&nlp=true`);
     const data = await res.json();
     if (data.error) {
-      state = { ...state, message: `File memory is ready. River classification needs review: ${data.error}` };
+      state = { ...state, message: `File memory is ready. Final Intelligence classification needs review: ${data.error}` };
     } else {
-      state = { ...state, message: `File memory is ready. River classified ${fmtInt(data.total || 0)} cached files for review.` };
+      state = { ...state, message: `File memory is ready. Final Intelligence classified ${fmtInt(data.total || 0)} cached files for review.` };
     }
   } catch (err) {
-    state = { ...state, message: "File memory is ready. River classification can run from Intelligence when the API is free." };
+    state = { ...state, message: "File memory is ready. Final Intelligence classification can run from Review when the API is free." };
   }
   render();
 }
 
 async function loadStats() {
+  if (!isScannedForCurrentPath()) return;
   try {
-    const res = await fetch(`${API}/api/cache/status`);
+    const target = state.scannedPath || state.path;
+    const res = await fetch(`${API}/api/cache/summary?root=${encodeURIComponent(target)}`);
     const data = await res.json();
     state = { ...state, stats: data };
     render();
@@ -969,11 +1170,14 @@ async function askRiver(queryOverride = "") {
   const input = document.getElementById("askRiverInput");
   const query = (queryOverride || input?.value || state.intent.query || "").trim();
   if (!query) {
-    state = { ...state, message: "Tell River what you want to do first." };
+    state = { ...state, message: "Tell the Final Intelligence System what you want to do first." };
     render();
     return;
   }
-  state = { ...state, busy: true, intent: { ...state.intent, query }, message: "River is building a preview storyboard..." };
+  if (!ensureScannedForAction("Ask Final Intelligence")) {
+    return;
+  }
+  state = { ...state, busy: true, intent: { ...state.intent, query }, message: "The Final Intelligence System is building a preview storyboard..." };
   render();
   try {
     const res = await fetch(`${API}/api/intent`, {
@@ -984,7 +1188,7 @@ async function askRiver(queryOverride = "") {
     const plan = await res.json();
     state = { ...state, busy: false, intent: { query, plan }, message: "Storyboard ready. Nothing has changed." };
   } catch (err) {
-    state = { ...state, busy: false, message: "River could not build that storyboard yet." };
+    state = { ...state, busy: false, message: "The Final Intelligence System could not build that storyboard yet." };
   }
   render();
 }
@@ -1001,11 +1205,11 @@ function askRiverHtml() {
   return `
     <section class="ask-river">
       <div class="ask-river-head">
-        <div class="ask-river-title">Ask River</div>
-        <p class="explain">Type the goal in plain English. River turns it into a preview-only storyboard before anything can run.</p>
+        <div class="ask-river-title">Ask Final Intelligence</div>
+        <p class="explain">Type the goal in plain English. Final Intelligence turns it into a preview-only storyboard before anything can run.</p>
         <div class="ask-river-grid">
           <input class="input mono" id="askPathInput" value="${esc(state.path)}">
-          <input class="input" id="askRiverInput" value="${esc(state.intent.query || "")}" placeholder='Ask River... "clean up duplicates and rename the rest"'>
+          <input class="input" id="askRiverInput" value="${esc(state.intent.query || "")}" placeholder='Ask Final Intelligence... "clean up duplicates and rename the rest"'>
           <button class="btn btn-blue" id="askRiverBtn" ${state.busy ? "disabled" : ""}>${state.busy ? "Thinking..." : "Build Storyboard"}</button>
         </div>
         <div class="ask-chip-row">
@@ -1054,7 +1258,7 @@ async function selectDecisionAction(action) {
 }
 
 async function loadDecisionItems(goal, action) {
-  if (goal === "clean") {
+  if (goal === "rename") {
     const res = await fetch(`${API}/api/cache/rename-plan?root=${encodeURIComponent(state.path)}&limit=50`);
     const data = await res.json();
     return (data.operations || []).map(op => ({
@@ -1070,12 +1274,18 @@ async function loadDecisionItems(goal, action) {
   const res = await fetch(`${API}/api/cache/findings?root=${encodeURIComponent(state.path)}&limit=80`);
   const data = await res.json();
   const actionTypes = {
-    combine: ["tiny_folder", "similar_folder_names", "single_theme_cluster"],
-    separate: ["archive_export_residue", "mixed_purpose_folder", "unknown_file", "bad_folder_name"],
-    hub: ["single_theme_cluster", "project_seed"],
+    combine: ["tiny_folder", "similar_folder_names", "single_theme_cluster", "bad_folder_name"],
+    hub: ["project_seed", "single_theme_cluster"],
+    separate: ["mixed_purpose_folder", "archive_export_residue", "unknown_file", "bad_folder_name"],
+    split_by_date: ["mixed_purpose_folder", "old_inactive_folder", "archive_export_residue"],
+    split_by_topic: ["single_theme_cluster", "bad_folder_name", "unknown_file", "project_seed"],
+    dedupe_filename: ["duplicate_filename_size"],
+    dedupe_similar: ["duplicate_filename_size"],
+    create_seed: ["project_seed", "bad_folder_name", "empty_folder"],
+    create_by_pattern: ["single_theme_cluster", "unknown_file", "mixed_purpose_folder"],
     move: ["wrong_location_file", "orphan_file", "unknown_file"],
     archive: ["archive_export_residue", "old_inactive_folder", "large_space_user"],
-    delete_later: ["empty_folder", "duplicate_filename_size"]
+    delete_later: ["empty_folder", "duplicate_filename_size", "orphan_file"]
   };
   const allowed = actionTypes[action] || [];
   return (data.findings || [])
@@ -1148,28 +1358,34 @@ function decisionSuggestions(item) {
   const goal = state.decision.goal;
   const action = state.decision.action;
   if (!item) return [];
-  if (goal === "clean") {
+  if (goal === "rename") {
     const base = item.base || "clean-name";
     const stem = base.replace(/\.[^.]+$/, "");
     const ext = (base.match(/\.[^.]+$/) || [""])[0];
     return [
       { source: "Rules engine", value: base, confidence: 72 },
-      { source: "River", value: action === "domain_schema" ? `brain_system__${stem.replaceAll("-", "_")}__v01${ext}` : base, confidence: 84, recommended: true },
+      { source: "Final Intelligence", value: action === "domain_schema" ? `brain_system__${stem.replaceAll("-", "_")}__v01${ext}` : base, confidence: 84, recommended: true },
       { source: "NLP", value: action === "date_schema" ? `2026-06-14-${base}` : `programming__${stem.replaceAll("-", "_")}__v01${ext}`, confidence: 68 }
     ];
   }
   const pathName = item.filename || "selected item";
   const actionText = {
     combine: "combine into reviewed theme folder",
+    hub: "create a hub folder and keep sources linked",
     separate: "separate into clearer sub-buckets",
-    hub: "create a hub link without moving files",
+    split_by_date: "split by date buckets after review",
+    split_by_topic: "split by topic cluster",
+    dedupe_filename: "dedupe exact duplicate files",
+    dedupe_similar: "dedupe near-duplicate variants",
+    create_seed: "create a fresh project seed folder",
+    create_by_pattern: "create folders by recognized pattern",
     move: "move to the best matching active folder",
     archive: "archive after review",
     delete_later: "send to delete-later quarantine"
   }[action] || "review";
   return [
     { source: "Rules engine", value: item.suggested_action || actionText, confidence: 70 },
-    { source: "River", value: actionText, confidence: Math.min(92, 65 + Number(item.weight || 5) * 3), recommended: true },
+    { source: "Final Intelligence", value: actionText, confidence: Math.min(92, 65 + Number(item.weight || 5) * 3), recommended: true },
     { source: "NLP", value: `review ${pathName} as ${item.finding_type || "organization item"}`, confidence: 64 }
   ];
 }
@@ -1215,76 +1431,96 @@ async function chooseDecisionOption(choice, customValue = "") {
   state = {
     ...state,
     decision: { ...state.decision, index: nextIndex, saved: state.decision.saved + 1, custom: "" },
-    message: "Decision recorded. River learned from that choice."
+    message: "Decision recorded. Final Intelligence learned from that choice."
   };
   render();
 }
 
 function homeHtml() {
-  const cacheReady = state.result && state.result.mode === "inventory" && !state.result.error;
-  const findingCount = cacheReady ? (state.result.finding_count ?? 0) : null;
+  const cacheReady = isScannedForCurrentPath();
+  const findingCount = cacheReady
+    ? (state.stats?.finding_count ?? state.result?.finding_count ?? 0)
+    : null;
+  const canPromptForMode = cacheReady && state.homePhase === "stats" && state.postScanPrompt === true;
+  const canOpenWorkflows = cacheReady && state.homePhase === "questions";
+  const showManualWorkflow = canOpenWorkflows && state.modeSelection !== "advanced";
+  const showAdvancedWorkflows = canOpenWorkflows && state.modeSelection !== "manual";
   return `
-    ${askRiverHtml()}
     <section class="preflight-panel">
       <div class="preflight-grid">
         <div>
           <span class="card-code mono">STEP-00</span>
           <h2>Build the file memory first.</h2>
           <p class="explain">
-        The first run scans the folder and writes the inventory into SQLite. Large folders can take a little while the first time. After that, the sorter,
-        rename preview, intelligence checks, and reports can read from memory instead of walking every file again.
+            First-time setup scans the folder and runs the NLP pass, then writes everything into the local SQLite memory. Large folders can take a little while the first time. After this pass, everything is cached for fast follow-up.
           </p>
           <div class="preflight-list">
             <div>1. Count files, folders, extensions, dates, and size.</div>
             <div>2. Protect system folders and project seeds before suggestions.</div>
-            <div>3. Cache organization opportunities as review cards.</div>
+            <div>3. Cache organization opportunities and local NLP tags as review cards.</div>
             <div>4. Use the cached memory for fast follow-up work.</div>
           </div>
         </div>
-        <div class="preflight-status">
-          <strong>${cacheReady ? "Cache Ready" : "Prerequisite"}</strong>
-          <p class="explain">
-            ${cacheReady
-            ? `This folder has been indexed. ${findingCount} organization finding card(s) are ready for review.`
-              : "Choose the folder once, build the cache, then use the work cards below. The first pass is the slow pass."}
+          <div class="preflight-status">
+            <strong>${cacheReady ? "Cache Ready" : state.homePhase === "scanning" ? "Scanning..." : "Prerequisite"}</strong>
+            <p class="explain">
+            ${state.homePhase === "scanning"
+              ? `Large folders can take a minute or two. Timer: ${formatElapsed(state.scanElapsedSeconds)}`
+              : cacheReady
+                ? `This folder has been indexed. ${findingCount} organization finding card(s) are ready for review.`
+                : "Choose the folder once, build the cache, then use the work cards below. The first pass is the slow pass."}
+              ${state.homePhase === "stats" ? "Local statistics are ready." : ""}
           </p>
           <div class="folder-row">
             <input class="input mono" id="homePathInput" value="${esc(state.path)}">
             <button class="btn btn-gold" id="homeScanBtn" ${state.busy ? "disabled" : ""}>${state.busy ? "Scanning..." : "Scan First"}</button>
           </div>
-          ${state.message ? `<div class="notice">${esc(state.message)}</div>` : ""}
+        ${state.message ? `<div class="notice">${esc(state.message)}</div>` : ""}
+          ${state.path && normalizePath(state.path) !== normalizePath(state.scannedPath) ? `<div class="notice">Path changed. Scan this folder before running workflows.</div>` : ""}
+          ${canPromptForMode ? `<div class="notice"><strong>Scan complete.</strong> Are you ready for the next stage?</div><div class="actions"><button class="btn btn-gold" id="homeContinueBtn">Yes, continue</button></div>` : ""}
+          ${state.homePhase === "stats" && state.postScanPrompt === "mode" ? `
+            <div class="notice">
+              <strong>Scan done:</strong> do you want to work manually through the File Intelligence System?
+              <div class="actions" style="margin-top: 10px;">
+                <button class="btn btn-gold" id="homeManualPathBtn">Manual guided path</button>
+                <button class="btn btn-ghost" id="homeAdvancedPathBtn">Advanced workflow</button>
+              </div>
+            </div>
+          ` : ""}
         </div>
       </div>
     </section>
-    ${cacheReady ? cacheResult(state.result) : ""}
-    ${statsHtml(state.stats)}
-    ${decisionTreeHtml()}
-    <div class="section-label">${cacheReady ? "Next Workflows" : "Available After Cache"}</div>
-    <div class="workflow-grid">
-      ${Object.entries(flows).filter(([key]) => key !== "cache").map(([key, flow]) => `
-        <article class="workflow-card" data-flow="${key}">
-          <span class="card-code mono">${flow.code}</span>
-          <h3>${flow.title}</h3>
-          <p>${flow.desc}</p>
-          <span class="arrow">-&gt;</span>
-        </article>
-      `).join("")}
-    </div>
-    <section class="panel">
-      <div class="section-label">Reusable Template</div>
-      <p class="explain">
-        This page is the repeatable public-facing shape for file events. Each run should explain what happened,
-        what the system found, what it recommends next, and what still needs approval. The black advanced
-        workbench stays behind it for deeper controls.
-      </p>
-      <div class="tag-row">
-        <span class="tag tag-green">scan</span>
-        <span class="tag tag-blue">classify</span>
-        <span class="tag tag-purple">rename</span>
-        <span class="tag tag-amber">cache</span>
-        <span class="tag tag-green">create</span>
+      ${state.homePhase !== "scan" && state.homePhase !== "scanning" ? statsHtml(state.stats) : ""}
+      ${showManualWorkflow ? decisionTreeHtml() : ""}
+    ${showAdvancedWorkflows ? `
+      <div class="section-label">${cacheReady ? "Next Workflows" : "Available After Cache"}</div>
+      <div class="workflow-grid">
+        ${Object.entries(flows).filter(([key]) => key !== "cache").map(([key, flow]) => {
+          return `
+          <article class="workflow-card" data-flow="${key}">
+            <span class="card-code mono">${flow.code}</span>
+            <h3>${flow.title}</h3>
+            <p>${flow.desc}</p>
+            <span class="arrow">-&gt;</span>
+          </article>
+        `; }).join("")}
       </div>
-    </section>
+      <section class="panel">
+        <div class="section-label">Reusable Template</div>
+        <p class="explain">
+          This page is the repeatable public-facing shape for file events. Each run should explain what happened,
+          what the system found, what it recommends next, and what still needs approval. The black advanced
+          workbench stays behind it for deeper controls.
+        </p>
+        <div class="tag-row">
+          <span class="tag tag-green">scan</span>
+          <span class="tag tag-blue">classify</span>
+          <span class="tag tag-purple">rename</span>
+          <span class="tag tag-amber">cache</span>
+          <span class="tag tag-green">create</span>
+        </div>
+      </section>
+    ` : ""}
   `;
 }
 
@@ -1299,7 +1535,7 @@ function decisionTreeHtml() {
         <div>
           <span class="card-code mono">GUIDE-01</span>
           <h2>Three-question decision tree</h2>
-          <p class="panel-desc">Answer one question at a time. River narrows the action, then shows one cached item with three suggestions plus a custom correction.</p>
+        <p class="panel-desc">Answer one question at a time. Final Intelligence narrows the action, then shows one cached item with three suggestions plus a custom correction.</p>
         </div>
         <button class="back" id="resetDecisionBtn">Reset</button>
       </div>
@@ -1348,14 +1584,14 @@ function reviewCardHtml(item) {
     return `
       <div class="review-item">
         <div class="result-title"><h3>Review complete</h3><span class="tag tag-green">recorded</span></div>
-        <p class="explain">${fmtInt(d.saved)} decision(s) recorded. These choices become training data for River's preference engine.</p>
+        <p class="explain">${fmtInt(d.saved)} decision(s) recorded. These choices become training data for Final Intelligence.</p>
       </div>
     `;
   }
   const suggestions = decisionSuggestions(item);
   const riverPick = suggestions.find(s => s.recommended) || suggestions[1] || suggestions[0] || {};
   const currentLabel = item.kind === "rename" ? "Current name" : "Current item";
-  const proposedLabel = item.kind === "rename" ? "River suggested name" : "River suggested action";
+    const proposedLabel = item.kind === "rename" ? "Final Intelligence suggested name" : "Final Intelligence suggested action";
   return `
     <div class="review-item">
       <div class="result-title">
@@ -1378,7 +1614,7 @@ function reviewCardHtml(item) {
         </div>
         <span class="path mono">${esc(item.path || "")}</span>
       </div>
-      <div class="section-label" style="margin-top:14px">River recommends option 2</div>
+      <div class="section-label" style="margin-top:14px">Final Intelligence recommends option 2</div>
       <div class="suggestion-list">
         ${suggestions.map((s, i) => `
           <button class="suggestion-card ${s.recommended ? "recommended" : ""}" data-choice="${i}">
@@ -1391,7 +1627,7 @@ function reviewCardHtml(item) {
         <input class="input mono" id="customDecisionInput" value="${esc(d.custom)}" placeholder="None of these - type the right answer">
         <button class="btn btn-ghost" id="customDecisionBtn">Use custom</button>
       </div>
-      <div class="notice">Saved decisions in this session: ${fmtInt(d.saved)}. Custom corrections count more because they teach River what it missed.</div>
+      <div class="notice">Saved decisions in this session: ${fmtInt(d.saved)}. Custom corrections count more because they teach Final Intelligence what it missed.</div>
     </div>
   `;
 }
@@ -1402,59 +1638,59 @@ function statsHtml(stats) {
       <section class="panel">
         <div class="panel-head">
           <div>
-            <span class="card-code mono">TOTALS</span>
-            <h2>System statistics</h2>
-            <p class="panel-desc">Combined cache totals appear here after the dashboard talks to SQLite.</p>
+            <span class="card-code mono">LOCAL</span>
+            <h2>Folder statistics</h2>
+            <p class="panel-desc">Scan this folder first to load a compact local summary.</p>
           </div>
-          <button class="back" id="refreshStatsBtn">Refresh totals</button>
         </div>
       </section>
     `;
   }
   if (stats.error) {
-    return `<section class="panel"><div class="section-label">System Statistics</div><p class="explain">${esc(stats.error)}</p></section>`;
+    return `<section class="panel"><div class="section-label">Folder statistics</div><p class="explain">${esc(stats.error)}</p></section>`;
   }
-  const counts = stats.counts || {};
-  const latestInventory = (stats.inventory_scans || [])[0];
+  const counts = stats;
+  const extList = Array.isArray(stats.ext_counts)
+    ? stats.ext_counts.slice(0, 8).map(x => ({ ext: x.ext ?? "file", count: x.count ?? 0 }))
+    : Object.entries(stats.ext_counts || {}).map(([ext, count]) => ({ ext, count }));
+  const fileTypes = Array.isArray(stats.classify_top_tags) ? stats.classify_top_tags.slice(0, 8) : [];
   return `
     <section class="panel">
       <div class="panel-head">
         <div>
-          <span class="card-code mono">TOTALS</span>
-          <h2>System statistics</h2>
-          <p class="panel-desc">This is the combined SQLite memory: scans, cached files, folders, findings, decisions, and actions across the system.</p>
+          <span class="card-code mono">LOCAL</span>
+          <h2>Folder statistics</h2>
+          <p class="panel-desc">This folder was scanned into local memory. Use it to validate the next decision.</p>
         </div>
-        <button class="back" id="refreshStatsBtn">Refresh totals</button>
       </div>
       <div class="metric-grid">
-        <div class="metric"><strong>${fmtInt(counts.files)}</strong><span>Cached files</span></div>
-        <div class="metric"><strong>${fmtInt(counts.folders)}</strong><span>Cached folders</span></div>
-        <div class="metric"><strong>${fmtInt(counts.findings)}</strong><span>Finding cards</span></div>
-        <div class="metric"><strong>${fmtBytes(counts.total_size)}</strong><span>Cached file size</span></div>
-        <div class="metric"><strong>${fmtInt(counts.scan_runs)}</strong><span>Scan runs</span></div>
-        <div class="metric"><strong>${fmtInt(counts.actions)}</strong><span>Logged actions</span></div>
+        <div class="metric"><strong>${fmtInt(counts.folder_count ?? 0)}</strong><span>Folders</span></div>
+        <div class="metric"><strong>${fmtInt(counts.file_count ?? 0)}</strong><span>Files</span></div>
+        <div class="metric"><strong>${fmtInt(counts.finding_count ?? 0)}</strong><span>Finding cards</span></div>
+        <div class="metric"><strong>${fmtInt(counts.classified ?? 0)}</strong><span>Classified</span></div>
       </div>
-      ${latestInventory ? `
+      ${counts.scan_path ? `
         <div class="notice">
-          Latest inventory scan: <strong>${fmtInt(latestInventory.file_count)}</strong> files from
-          <span class="mono">${esc(latestInventory.scan_path)}</span>
-          <span class="tag ${latestInventory.status === "complete" ? "tag-green" : "tag-amber"}">${esc(latestInventory.status)}</span>
+          <span class="section-label">Scanned folder</span>
+          <span class="mono">${esc(counts.scan_path || state.scannedPath || state.path)}</span>
+          <span class="tag tag-green">scan ready</span>
         </div>
       ` : ""}
       <div class="stats-split">
+        ${extList.length ? `
+          <div class="notice">
+            <div class="section-label">Top File Types</div>
+            ${extList.map(row => `<p>${esc(row.ext)} - ${fmtInt(row.count)}</p>`).join("")}
+          </div>
+        ` : ""}
         <div class="notice">
-          <div class="section-label">Top File Types</div>
-          ${(stats.extensions || []).slice(0, 8).map(row => `<p>${esc(row.ext)} - ${fmtInt(row.count)}</p>`).join("")}
-        </div>
-        <div class="notice">
-          <div class="section-label">Finding Types</div>
-          ${(stats.finding_types || []).slice(0, 8).map(row => `<p>${esc(row.finding_type)} - ${fmtInt(row.count)}</p>`).join("") || "<p>No finding cards yet.</p>"}
+          <div class="section-label">Top NLP tags</div>
+          ${fileTypes.length ? fileTypes.map((row, i) => `<p>${i + 1}. ${esc(row.tag)} — ${fmtInt(row.count)}</p>`).join("") : "<p>No NLP tags yet.</p>"}
         </div>
       </div>
     </section>
   `;
 }
-
 function wizardHtml() {
   const spec = flows[state.flow];
   return `
@@ -1568,7 +1804,7 @@ function intelWalkthroughResult(r) {
     <section class="result-card">
       <div class="result-title">
         <h3>Step ${fmtInt(step + 1)} - ${esc(tier.title)}</h3>
-        <span class="tag ${auto ? "tag-green" : "tag-blue"}">${auto ? "River auto-approved" : "needs approval"}</span>
+            <span class="tag ${auto ? "tag-green" : "tag-blue"}">${auto ? "Final Intelligence auto-approved" : "needs approval"}</span>
       </div>
       <p class="explain">${tierExplanation(tier.weight)}</p>
       <div class="metric-grid">
@@ -1585,7 +1821,7 @@ function intelWalkthroughResult(r) {
         ${samples.map(item => `<p><strong>${esc(item.title)}</strong> - ${esc(item.evidence)}<br><span class="mono">${esc(item.path)}</span></p>`).join("")}
       </div>
       ${auto ? `
-        <div class="notice">River marks these as protected. They will not be moved, renamed, archived, or deleted.</div>
+          <div class="notice">Final Intelligence marks these as protected. They will not be moved, renamed, archived, or deleted.</div>
         <div class="actions"><button class="btn btn-gold" data-intel-action="auto_approve">Continue</button></div>
       ` : `
         <div class="actions">
@@ -1603,7 +1839,7 @@ function intelWalkthroughResult(r) {
 
 function tierExplanation(weight) {
   return {
-    10: "Safety first: these are protected/system items. River reports them, then leaves them alone.",
+    10: "Safety first: these are protected/system items. Final Intelligence reports them, then leaves them alone.",
     9: "These look like active project seeds or important duplicates. Review carefully before changing anything.",
     8: "These are high-value cleanup opportunities like bad names or wrong-location candidates.",
     7: "These need mapping or review: metadata gaps, unknown files, and archive/export residue.",
@@ -1646,7 +1882,7 @@ function intelSummaryCard(r) {
   return `
     <section class="result-card">
       <div class="result-title"><h3>Intelligence sort complete</h3><span class="tag tag-green">summary</span></div>
-      <p class="explain">River reviewed ${fmtInt(r.finding_count)} cached finding cards in weighted groups.</p>
+      <p class="explain">Final Intelligence reviewed ${fmtInt(r.finding_count)} cached finding cards in weighted groups.</p>
       <div class="metric-grid">
         <div class="metric"><strong>${fmtInt(total)}</strong><span>Items recorded</span></div>
         <div class="metric"><strong>${fmtInt(decisions.length)}</strong><span>Steps handled</span></div>
@@ -1708,7 +1944,7 @@ function suggestionButtons(row) {
   const options = [
     ["Baseline", "Known rule", suggestions.baseline || row.new_name || row.suggested || ""],
     ["David", "domain slug", suggestions.david_domain_slug || suggestions.domain_slug || ""],
-    ["River", "NLP style", suggestions.river_nlp || suggestions.river || ""]
+    ["Final Intelligence", "NLP style", suggestions.river_nlp || suggestions.river || ""]
   ].filter(option => option[2]);
   return `
     <div class="suggestion-strip">
@@ -1731,7 +1967,7 @@ function renameSampleResult(r) {
     : `Rename batch: ${fmtInt(total)} candidates`;
   const approvalText = allMode
     ? "The scan already looked through the folder and pulled out only the names that look worth human attention. Since this is a manageable set, every flagged candidate is shown."
-    : `The scan already looked through the folder. River pulled a review sample of ${fmtInt(sample)} names: the strangest ones first, then a spread by alphabet, extension, folder, and random spot checks.`;
+    : `The scan already looked through the folder. Final Intelligence pulled a review sample of ${fmtInt(sample)} names: the strangest ones first, then a spread by alphabet, extension, folder, and random spot checks.`;
   return `
     <section class="result-card">
       <div class="result-title">
@@ -1747,7 +1983,7 @@ function renameSampleResult(r) {
       <div class="trust-panel">
         <div class="trust-card"><strong>What was scanned</strong><span>The cache checks the folder names, file names, extensions, and known finding cards before this screen appears.</span></div>
         <div class="trust-card"><strong>Why these rows</strong><span>These are the names most likely to benefit from cleanup. Clean names stay out of your way.</span></div>
-        <div class="trust-card"><strong>Who decides</strong><span>River suggests. You select, edit, defer, or cancel. Nothing changes files from this screen alone.</span></div>
+        <div class="trust-card"><strong>Who decides</strong><span>Final Intelligence suggests. You select, edit, defer, or cancel. Nothing changes files from this screen alone.</span></div>
       </div>
       <div class="approval-toolbar">
         <div>
@@ -1884,10 +2120,12 @@ async function recordRenameApproval(scope) {
 
 function cacheResult(r) {
   const findings = (r.top_findings || []).slice(0, 5);
+  const tags = (r.classify_top_tags || []).slice(0, 8);
+  const previewRows = (r.classify_preview || []).slice(0, 5);
   return `
     <section class="result-card">
       <div class="result-title"><h3>Cache event recorded</h3><span class="tag tag-amber">shared memory</span></div>
-      <p class="explain">The folder inventory was written into the shared FIS SQLite cache. That gives the GUI a fast memory of file names, folders, extensions, and scan history.</p>
+      <p class="explain">${r.bootstrap ? "Inventory and NLP tagging were completed in sequence." : "The folder inventory was written into the shared FIS SQLite cache. That gives the GUI a fast memory of file names, folders, extensions, and scan history."}</p>
       <div class="metric-grid">
         <div class="metric"><strong>${r.file_count ?? 0}</strong><span>${r.stopped_at_limit ? "Files cached before cap" : "Files cached"}</span></div>
         <div class="metric"><strong>${r.folder_count ?? 0}</strong><span>Folders cached</span></div>
@@ -1898,6 +2136,25 @@ function cacheResult(r) {
         <div class="metric"><strong>${r.stopped_at_limit ? "Yes" : "No"}</strong><span>Hit scan cap</span></div>
         <div class="metric"><strong>${Object.keys(r.ext_counts || {}).length}</strong><span>File types</span></div>
       </div>
+      ${r.classify_requested ? `
+        <div class="metric-grid">
+          <div class="metric"><strong>${r.classified ?? 0}</strong><span>Files classified</span></div>
+          <div class="metric"><strong>${r.classification_errors ?? 0}</strong><span>Classification errors</span></div>
+          <div class="metric"><strong>${r.classify_max ?? 0}</strong><span>Classify cap</span></div>
+        </div>
+        ${tags.length ? `
+          <div class="notice">
+            <div class="section-label">Top NLP tags</div>
+            ${tags.map((item, i) => `<p>${i + 1}. ${esc(item.tag)} — ${fmtInt(item.count)}</p>`).join("")}
+          </div>
+        ` : ""}
+        ${previewRows.length ? `
+          <div class="notice">
+            <div class="section-label">Classify preview</div>
+            ${previewRows.map(item => `<p><strong>${esc(item.filename || "file")}</strong> (${esc(item.domain || "unknown")}, ${fmtInt(item.confidence)}%)<br><small class="text-dim">${esc(item.summary || item.nlp_summary || "No summary generated.")}</small></p>`).join("")}
+          </div>
+        ` : ""}
+      ` : ""}
       ${findings.length ? `
         <div class="notice">
           <div class="section-label">Top Opportunities</div>
@@ -1963,17 +2220,53 @@ function createResult(r) {
 
 function render() {
   document.getElementById("app").innerHTML = state.flow ? wizardHtml() : homeHtml();
+  const quickLinks = document.querySelectorAll(".hero .quick-link");
+  const heroScan = document.getElementById("heroScanBtn");
+  const allowAdvancedLinks = isScannedForCurrentPath() && state.homePhase === "questions" && state.modeSelection !== "manual";
+  quickLinks.forEach(link => {
+    if (link === heroScan) return;
+    link.style.display = allowAdvancedLinks ? "" : "none";
+    link.disabled = !allowAdvancedLinks;
+  });
+  if (heroScan) heroScan.textContent = state.busy ? "Scanning..." : "Scan folder first";
+
   document.querySelectorAll("[data-flow]").forEach(el => el.addEventListener("click", () => setFlow(el.dataset.flow)));
+  document.querySelectorAll("[data-next-flow]").forEach(el => el.addEventListener("click", () => setFlow(el.dataset.nextFlow)));
   const back = document.getElementById("backBtn");
   if (back) back.addEventListener("click", goHome);
   const homeInput = document.getElementById("homePathInput");
-  if (homeInput) homeInput.addEventListener("input", e => { state.path = e.target.value; });
+  if (homeInput) homeInput.addEventListener("input", e => {
+    const nextPath = e.target.value;
+    state.path = nextPath;
+    if (normalizePath(nextPath) !== normalizePath(state.scannedPath)) {
+      clearScanTimer();
+      state.homePhase = "scan";
+      state.postScanPrompt = false;
+      state.modeSelection = null;
+      state.scanElapsedSeconds = 0;
+    }
+  });
   const homeScan = document.getElementById("homeScanBtn");
   if (homeScan) homeScan.addEventListener("click", runPreflightScan);
-  const heroScan = document.getElementById("heroScanBtn");
   if (heroScan) heroScan.addEventListener("click", runPreflightScan);
+  const phaseNext = document.getElementById("homeContinueBtn");
+  if (phaseNext) phaseNext.addEventListener("click", continueSetup);
+  const manualModeBtn = document.getElementById("homeManualPathBtn");
+  if (manualModeBtn) manualModeBtn.addEventListener("click", chooseManualPath);
+  const advancedModeBtn = document.getElementById("homeAdvancedPathBtn");
+  if (advancedModeBtn) advancedModeBtn.addEventListener("click", chooseAdvancedPath);
   const askPathInput = document.getElementById("askPathInput");
-  if (askPathInput) askPathInput.addEventListener("input", e => { state.path = e.target.value; });
+  if (askPathInput) askPathInput.addEventListener("input", e => {
+    const nextPath = e.target.value;
+    state.path = nextPath;
+    if (normalizePath(nextPath) !== normalizePath(state.scannedPath)) {
+      clearScanTimer();
+      state.homePhase = "scan";
+      state.postScanPrompt = false;
+      state.modeSelection = null;
+      state.scanElapsedSeconds = 0;
+    }
+  });
   const askRiverInput = document.getElementById("askRiverInput");
   if (askRiverInput) {
     askRiverInput.addEventListener("input", e => { state.intent.query = e.target.value; });
@@ -1984,8 +2277,6 @@ function render() {
   document.querySelectorAll("[data-ask]").forEach(el => {
     el.addEventListener("click", () => askRiver(el.dataset.ask));
   });
-  const refreshStats = document.getElementById("refreshStatsBtn");
-  if (refreshStats) refreshStats.addEventListener("click", loadStats);
   document.querySelectorAll("[data-goal]").forEach(el => {
     el.addEventListener("click", () => selectDecisionGoal(el.dataset.goal));
   });
@@ -2062,71 +2353,23 @@ function render() {
   if (renameCancelBtn) renameCancelBtn.addEventListener("click", goHome);
   updateRenameApprovalCount();
   const input = document.getElementById("pathInput");
-  if (input) input.addEventListener("input", e => { state.path = e.target.value; });
+  if (input) input.addEventListener("input", e => {
+    const nextPath = e.target.value;
+    state.path = nextPath;
+    if (normalizePath(nextPath) !== normalizePath(state.scannedPath)) {
+      clearScanTimer();
+      state.homePhase = "scan";
+      state.postScanPrompt = false;
+      state.modeSelection = null;
+      state.scanElapsedSeconds = 0;
+    }
+  });
   const run = document.getElementById("runBtn");
   if (run) run.addEventListener("click", runFlow);
 }
 
 render();
-loadStats();
 </script>
-
-<script>
-(function(){
-  function storyEl(id){ return document.getElementById(id); }
-  async function riverJson(url, options){
-    const res = await fetch(url, options || {});
-    const body = await res.json();
-    if (!body.ok) throw new Error((body.errors || ["River request failed"]).join("; "));
-    return body.data;
-  }
-  function ensureStoryMode(){
-    if (storyEl("riverStoryMode")) return;
-    const panel = document.createElement("section");
-    panel.id = "riverStoryMode";
-    panel.className = "story-mode-shell";
-    panel.innerHTML = `
-      <div class="story-hero"><div><p class="eyebrow">Simple Mode</p><h2>One folder. One guided action.</h2><p>Ask River for the next safest recipe. Manual Advanced stays available underneath.</p></div></div>
-      <div class="story-ask"><input id="storyPathInput" placeholder="Folder path"/><input id="storyIntentInput" placeholder="Ask River: clean duplicates, fix names, sort by type..."/><button id="storyScanBtn">Recommend next action</button></div>
-      <div id="storyRecipeCard" class="story-recipe-card muted">No recommendation yet.</div>
-      <div id="storyBoardCard" class="storyboard-card"></div>`;
-    document.body.insertBefore(panel, document.body.firstChild);
-    const pathInput = storyEl("pathInput");
-    if (pathInput) storyEl("storyPathInput").value = pathInput.value || "";
-    storyEl("storyScanBtn").addEventListener("click", buildRecommendation);
-  }
-  function recipeHtml(recipe){
-    if (!recipe) return "<p>No recipe found yet.</p>";
-    return `<p class="eyebrow">Recommended Next Action</p><h3>${recipe.title}</h3><p>${recipe.one_sentence}</p><div class="story-pills"><span>confidence ${Math.round(recipe.confidence*100)}%</span><span>risk ${recipe.risk}</span><span>${recipe.primitives.join(" → ")}</span></div><p class="why">${recipe.reason}</p><button id="buildStoryboardBtn">Build Storyboard</button><button id="storySkipBtn" class="ghost">Not now</button>`;
-  }
-  function storyboardHtml(story){
-    if (!story) return "";
-    const steps = (story.story_steps || []).map(s => `<li><b>${s.title}</b> — ${s.sentence}</li>`).join("");
-    const safety = story.safety || {};
-    const blockers = (safety.blockers || []).map(b => `<li>${b}</li>`).join("") || "<li>No blockers in preview.</li>";
-    return `<h3>${story.title}</h3><p>${story.subtitle}</p><ol class="story-progress">${steps}</ol><div class="story-safety"><b>Safety:</b> ${safety.risk || story.risk}<ul>${blockers}</ul></div><div class="story-actions"><button id="storyApproveBtn">Approve plan</button><button class="ghost">Edit plan</button><button class="ghost">Skip</button><button class="ghost">Defer</button></div><details><summary>Technical details</summary><pre>${JSON.stringify(story, null, 2)}</pre></details>`;
-  }
-  async function buildRecommendation(){
-    const path = storyEl("storyPathInput").value.trim();
-    const intent = storyEl("storyIntentInput").value.trim();
-    if (!path) return;
-    const recipe = await riverJson(`/api/recipes/next?path=${encodeURIComponent(path)}&intent=${encodeURIComponent(intent)}`);
-    storyEl("storyRecipeCard").className = "story-recipe-card";
-    storyEl("storyRecipeCard").innerHTML = recipeHtml(recipe);
-    storyEl("buildStoryboardBtn").addEventListener("click", async () => {
-      const story = await riverJson("/api/storyboard/build", {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({path, recipe_id: recipe.recipe_id})});
-      storyEl("storyBoardCard").innerHTML = storyboardHtml(story);
-      const approve = storyEl("storyApproveBtn");
-      if (approve) approve.addEventListener("click", async () => {
-        const decision = await riverJson("/api/storyboard/decision", {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({storyboard_id: story.storyboard_id, decision:"approve"})});
-        approve.textContent = decision.executes === false ? "Approved — execute still requires confirmation" : "Approved";
-      });
-    });
-  }
-  ensureStoryMode();
-})();
-</script>
-
 </body>
 </html>
 

@@ -1,5 +1,8 @@
-"""Route module placeholder for the split River FIS API layout.
+"""Intelligence/legacy compatibility route contract for River FIS."""
 
-The lightweight stdlib HTTP server in app.server owns dispatch for now; these modules mark
-stable destinations for the next Flask/FastAPI pass without mixing business logic into routes.
-"""
+ENDPOINTS = {
+    "GET /api/fingerprint": "Legacy fingerprint tool endpoint; compatibility response unless fully wired.",
+    "GET /api/folders/compare": "Legacy compare endpoint; compatibility response unless fully wired.",
+    "GET /api/folders/composition": "Legacy composition endpoint; compatibility response unless fully wired.",
+    "POST /api/nlp-classify": "Optional NLP compatibility endpoint; never loads models on startup.",
+}
