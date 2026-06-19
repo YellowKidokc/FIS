@@ -2,34 +2,47 @@
 
 ## Production entrypoint
 - `/` is served by `app/server.py` from `ui/index.html`.
-- `ui/index.html` is the production app shell and owns the guided flow: Folder → Scan → Recommendation → Storyboard → Preview → Approve → Safety → Execute → Record.
+- `ui/index.html` is the final production entrypoint and owns the guided flow: Folder → Scan → Recommendation → Storyboard → Preview → Approve → Safety → Execute → Record.
 
-## Legacy/demo files
-- `ui/simple.html` is retained as a legacy Story Mode reference until the production shell has been proven by tests and smoke checks.
-- Top-level `index.html`, `simple.html`, and JSX demo files are legacy review candidates, not production entrypoints.
+## Production modes
+The main UI exposes exactly five production modes:
+1. Home / Story
+2. Intelligence
+3. Advanced
+4. Plans / History
+5. Diagnostics
+
+Classic Legacy is retained only as a hidden fallback button and is not a main production mode.
 
 ## Active CSS files
-- `ui/styles/river.css` provides the black/gold River product shell, cards, pills, workbench, and mode layout.
-- `ui/styles/storyboard.css` provides storyboard-specific approval and progress rail styling.
+- `ui/styles/river.css` provides the stable app shell, left navigation, black/gold visual system, cards, status rail, diagnostics, and Advanced workbench layout.
+- `ui/styles/storyboard.css` provides storyboard-specific approval, progress rail, change table, safety, and subtle pulse styling.
+- `ui/styles/intelligent.css` is not referenced by production `ui/index.html` and should be reviewed before archive.
 
-## Active components / render helpers
-The production app uses vanilla JavaScript render helpers embedded in `ui/index.html`:
+## Active JS/component files
+The production app uses vanilla JavaScript embedded in `ui/index.html`; no frontend framework is loaded.
+Active render/helpers include:
+- `apiFetch()`
 - `renderRecipeCard()`
 - `renderStoryboard()`
 - `renderReviewBlock()`
 - `renderActionPlan()`
 - `renderSafetyStatus()`
-- `renderToast()` behavior via `toast()`
+- `toast()`
 - `renderEmptyState()`
 
-`ui/components/*.jsx` remains as reference component material only and is not loaded by production `ui/index.html`.
+`ui/components/*.jsx` remains reference material only. It is not loaded by production `ui/index.html`.
 
-## API endpoints by section
+## API endpoints by mode
 
 ### Home / Story
+- `GET /api/health`
 - `POST /api/scan`
+- `GET /api/recipes?path=`
 - `GET /api/recipes/next?path=`
 - `POST /api/storyboard/build`
+- `GET /api/storyboard?id=`
+- `POST /api/storyboard/decision`
 - `POST /api/action/plan`
 - `POST /api/action/preview`
 - `POST /api/action/approve`
@@ -42,15 +55,26 @@ The production app uses vanilla JavaScript render helpers embedded in `ui/index.
 - `GET /api/recipes?path=`
 
 ### Advanced
-- Uses scanned review blocks and dry-run action plan endpoints.
-- No direct execution is exposed from Advanced Mode.
+- Uses scanned FolderBrain/review block/recipe data.
+- Creates or previews dry-run plans through `POST /api/action/plan` and `POST /api/action/preview`.
+- Advanced does not execute directly.
 
 ### Plans / History
-- Displays client-session action plans, previews, approvals, safety blockers, and execution responses.
-- Uses `POST /api/action/preview`, `POST /api/action/approve`, and guarded `POST /api/action/execute`.
+- Shows client-session plans, previews, approvals, decisions, safety blockers, and executor logs.
+- Uses `POST /api/action/preview`, `POST /api/action/approve`, guarded `POST /api/action/execute`, and `POST /api/preferences/record`.
 
-### Settings / Diagnostics
+### Diagnostics
 - `GET /api/health`
 - `GET /api/routes`
-- `GET /api/stats`
+- `GET /api/cache/status`
+- `GET /api/preferences/stats`
 - `POST /api/project/export-prompt`
+
+## Legacy files
+- `ui/simple.html` stays in LEGACY_KEEP until production UI click-through and tests remain stable.
+- Top-level `index.html`, top-level `simple.html`, `file-sorter-gui-v2.jsx`, and `file-sorter-v3.jsx` are legacy/demo review candidates.
+
+## Safe to archive later after tests
+- Unreferenced component files under `ui/components/` after confirming no production import/reference.
+- `ui/styles/intelligent.css` if no future production view uses it.
+- Old manual/demo pages after `docs/PURGE_PLAN.md` evidence gates pass.

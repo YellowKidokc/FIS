@@ -16,6 +16,7 @@ This plan documents cleanup candidates. Do not permanently delete source scripts
 - `ui/index.html`
 - `ui/styles/river.css`
 - `ui/styles/storyboard.css`
+- production Diagnostics mode and route registry
 - `docs/UI_MAP.md`
 - `docs/PURGE_PLAN.md`
 - `docs/SCRIPT_INVENTORY.md`
@@ -23,6 +24,7 @@ This plan documents cleanup candidates. Do not permanently delete source scripts
 ## LEGACY_KEEP
 - `ui/simple.html` until Story Mode is fully validated inside `ui/index.html`.
 - `ui/components/*.jsx` as design/reference components until production parity is confirmed.
+- Classic Legacy hidden fallback only; not a production main mode.
 - Old manual/advanced workbench artifacts if still useful for operation copy.
 
 ## ARCHIVE_AFTER_TESTS

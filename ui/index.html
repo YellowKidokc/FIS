@@ -1,44 +1,350 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>River FIS</title><link rel="stylesheet" href="/ui/styles/river.css"><link rel="stylesheet" href="/ui/styles/storyboard.css"></head><body>
-<header class="topbar"><div class="brand">RIVER <span>FIS</span><div class="small muted">One folder. One guided action.</div></div><nav class="nav" id="nav"></nav></header>
-<main class="wrap">
-<section class="hero"><h1>Production River shell</h1><p class="muted">Folder → Scan → Recommendation → Storyboard → Preview → Approve → Safety → Execute → Record</p><div class="bar"><input id="folderPath" placeholder="Folder path"><button class="btn primary" onclick="scanFolder()">Scan</button><button class="btn" onclick="useLatest()">Use latest</button></div><textarea id="ask" placeholder="Ask River: clean this folder, fix names, find duplicates, sort by type, or just tell me what this is"></textarea></section>
-<section id="home" class="mode active"><div class="grid cols-2"><div><h2>Recommended Action</h2><div id="recommended" class="empty">No folder scanned yet. Choose a folder path and run Scan.</div><h3>Secondary Actions</h3><div id="secondary" class="grid cols-3"></div></div><div><h2>Storyboard</h2><div id="storyboard" class="empty">Build a storyboard from a recommendation. No files are changed.</div></div></div></section>
-<section id="intelligence" class="mode"><h2>Intelligence</h2><div id="brain" class="card empty">No folder scanned yet.</div><h3>Review Blocks</h3><div id="blocks" class="grid cols-3"></div><h3>Findings</h3><div id="findings" class="list"></div></section>
-<section id="advanced" class="mode"><h2>Advanced Workbench</h2><div class="row"><select id="viewMode"><option>Folder View</option><option>Flat File View</option><option>Duplicate Clusters</option><option>Composition View</option><option>Similar Hubs</option><option>Action Plan View</option><option>History / Preferences</option></select><select id="groupBy"><option>folder</option><option>extension</option><option>domain</option><option>theme</option><option>duplicate cluster</option><option>date</option><option>size</option><option>confidence</option><option>risk</option></select><span class="pill">Selected: <b id="selectedCount">0</b></span></div><div class="grid workbench"><aside class="card"><h3>Scope + Filters</h3><input placeholder="Filter text"><label><input type="checkbox"> Low risk only</label><label><input type="checkbox"> Has evidence</label></aside><section class="card"><h3>Results / Groups</h3><div class="tabs" id="opTabs"></div><div id="advancedResults" class="empty">Scan a folder, then choose an operation group.</div></section><aside class="card"><h3>Action Composer</h3><p id="selectedOperation" class="muted">No direct execution from Advanced Mode.</p><p class="pill caution">Creates dry-run plans only</p><button class="btn" onclick="previewFromAdvanced()">Preview Plan</button><button class="btn" onclick="createPlanFromCurrent()">Create Plan</button><button class="btn" onclick="explainCurrentAsStory()">Explain as Story</button></aside></div></section>
-<section id="plans" class="mode"><h2>Plans / History</h2><div id="plansList" class="list empty">Action plans, approvals, safety blockers, executor logs, and decisions appear here after preview.</div></section>
-<section id="settings" class="mode"><h2>Settings / Diagnostics</h2><div id="diagnostics" class="grid cols-2"></div><div class="row"><button class="btn" disabled>Run smoke flow — not wired yet</button><button class="btn" onclick="exportPrompt()">Export project prompt</button><button class="btn" disabled>Clear runtime store — not wired yet</button><button class="btn" disabled>Open runbook — not wired yet</button></div></section>
-</main><div id="toast" class="toast" hidden></div>
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>River FIS</title>
+  <link rel="stylesheet" href="/ui/styles/river.css">
+  <link rel="stylesheet" href="/ui/styles/storyboard.css">
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <div class="brand">RIVER <span>FIS</span></div>
+      <div class="top-meta">
+        <span class="health-dot" id="healthDot"></span><span id="healthText">checking server</span>
+        <span class="meta-item mono" id="currentFolder">No folder selected</span>
+        <span class="meta-item">Mode: <b id="currentMode">Home / Story</b></span>
+        <span class="meta-item">Last scan: <b id="lastScan">never</b></span>
+        <span class="pill safe">Nothing changed unless you execute</span>
+      </div>
+    </header>
+
+    <aside class="sidebar">
+      <button class="active" onclick="showMode('home')" id="nav-home">Home / Story</button>
+      <button onclick="showMode('intelligence')" id="nav-intelligence">Intelligence</button>
+      <button onclick="showMode('advanced')" id="nav-advanced">Advanced</button>
+      <button onclick="showMode('plans')" id="nav-plans">Plans / History</button>
+      <button onclick="showMode('diagnostics')" id="nav-diagnostics">Diagnostics</button>
+      <button class="legacy" onclick="openClassicLegacy()">Classic Legacy</button>
+    </aside>
+
+    <main class="content">
+      <section class="hero compact">
+        <h1>River FIS</h1>
+        <p class="muted">One folder. One guided action.</p>
+        <div class="state-strip"><span id="appState" class="pill info">EMPTY</span><span id="stateCopy">Choose a folder and run Scan.</span></div>
+        <div class="bar">
+          <input id="folderPath" placeholder="Folder path">
+          <button class="btn primary" onclick="scanFolder()">Scan</button>
+          <button class="btn" onclick="useLatest()">Use Latest</button>
+        </div>
+        <textarea id="ask" placeholder="Ask River: clean this folder, fix names, find duplicates, sort by type, build hub, or just tell me what this is"></textarea>
+        <div class="chips">
+          <button onclick="setAsk('Clean duplicates')">Clean duplicates</button>
+          <button onclick="setAsk('Fix names')">Fix names</button>
+          <button onclick="setAsk('Sort by type')">Sort by type</button>
+          <button onclick="setAsk('Build hub')">Build hub</button>
+          <button onclick="setAsk('Just tell me what this is')">Just tell me what this is</button>
+        </div>
+      </section>
+
+      <section id="home" class="mode active">
+        <div class="grid cols-2">
+          <div>
+            <h2>Recommended action</h2>
+            <div id="recommended" class="empty">Choose a folder and run Scan.</div>
+            <h3>Other useful actions</h3>
+            <div id="secondary" class="grid cols-3"></div>
+          </div>
+          <div>
+            <h2>Storyboard</h2>
+            <div id="storyboard" class="empty">Build a storyboard from a recommendation. No files are changed.</div>
+          </div>
+        </div>
+      </section>
+
+      <section id="intelligence" class="mode">
+        <h2>Intelligence</h2>
+        <div id="brain" class="card empty">No folder scanned yet.</div>
+        <h3>Review blocks</h3>
+        <div id="blocks" class="grid cols-3"></div>
+        <h3>Recipe candidates</h3>
+        <div id="recipeCandidates" class="grid cols-3"></div>
+        <h3>Findings</h3>
+        <div id="findings" class="list"></div>
+      </section>
+
+      <section id="advanced" class="mode">
+        <h2>Advanced</h2>
+        <div class="advanced-top row">
+          <input id="advancedPath" placeholder="Folder path mirrors Home scope">
+          <button class="btn" onclick="scanFolder()">Scan / Refresh</button>
+          <select id="viewMode" onchange="renderAdvancedCenter()"><option>Folder View</option><option>Flat File View</option><option>Duplicate Clusters</option><option>Composition View</option><option>Similar Hubs</option><option>Action Plan View</option><option>History / Preferences</option></select>
+          <select id="groupBy" onchange="renderAdvancedCenter()"><option>folder</option><option>extension</option><option>domain</option><option>theme</option><option>duplicate cluster</option><option>date</option><option>size</option><option>confidence</option><option>risk</option></select>
+          <span class="pill">Selected: <b id="selectedCount">0</b></span>
+        </div>
+        <div class="grid workbench">
+          <aside class="card filter-panel">
+            <h3>Scope + Filters</h3>
+            <input placeholder="File types: pdf, xlsx, py">
+            <select><option>Any risk</option><option>Low risk</option><option>Needs review</option><option>Blocked</option></select>
+            <select><option>Any confidence</option><option>High confidence</option><option>Medium confidence</option><option>Low confidence</option></select>
+            <input placeholder="Domain or keyword">
+            <input placeholder="Date range">
+            <input placeholder="Size range">
+            <label><input type="checkbox"> protected only</label>
+            <label><input type="checkbox"> unreviewed only</label>
+          </aside>
+          <section class="card">
+            <h3>Results / Groups</h3>
+            <div id="advancedResults" class="empty">Scan a folder, then choose a view mode.</div>
+          </section>
+          <aside class="card composer">
+            <h3>Action Composer</h3>
+            <div class="tabs" id="opTabs"></div>
+            <p id="selectedOperation" class="muted">Advanced creates dry-run plans only.</p>
+            <div class="card inset"><b>Safety note</b><p>Nothing executes from Advanced. Use Storyboard approval and a separate confirmation.</p></div>
+            <button class="btn" onclick="previewFromAdvanced()">Preview Plan</button>
+            <button class="btn" onclick="createPlanFromCurrent()">Create Plan</button>
+            <button class="btn" onclick="explainCurrentAsStory()">Explain as Story</button>
+          </aside>
+        </div>
+      </section>
+
+      <section id="plans" class="mode">
+        <h2>Plans / History</h2>
+        <div class="grid cols-2">
+          <div><h3>Action plans</h3><div id="plansList" class="list empty">No action plans yet.</div></div>
+          <div><h3>Decisions and executor logs</h3><div id="historyList" class="list empty">Approvals, deferrals, execution results, and preference events appear here.</div></div>
+        </div>
+      </section>
+
+      <section id="diagnostics" class="mode">
+        <h2>Diagnostics</h2>
+        <div id="diagnosticsGrid" class="grid cols-2"></div>
+        <div class="row diagnostic-actions">
+          <button class="btn" disabled>Run smoke flow — not wired yet</button>
+          <button class="btn" onclick="exportPrompt()">Export project prompt</button>
+          <button class="btn" disabled>Clear runtime store — not wired yet</button>
+          <button class="btn" disabled>Open runbook — not wired yet</button>
+          <button class="btn" disabled>Open purge plan — not wired yet</button>
+        </div>
+      </section>
+    </main>
+
+    <footer class="status-rail">
+      <span>Plan: <b id="railPlan">none</b></span>
+      <span>Safety: <b id="railSafety">not checked</b></span>
+      <span>Warnings: <b id="railWarnings">0</b></span>
+      <span class="mono" id="railError"></span>
+    </footer>
+  </div>
+  <div id="toast" class="toast" hidden></div>
+
 <script>
-const modes=[['home','Home / Story'],['intelligence','Intelligence'],['advanced','Advanced'],['plans','Plans / History'],['settings','Settings / Diagnostics']];
-const state={path:'',scan:null,recipes:[],next:null,story:null,plan:null,preview:null,approved:null,health:null,stats:null};
-document.getElementById('nav').innerHTML=modes.map(([id,label])=>`<button onclick="showMode('${id}')" id="nav-${id}" class="${id==='home'?'active':''}">${label}</button>`).join('');
-async function apiFetch(path, options = {}) { const res = await fetch(path, options); const json = await res.json(); if (!json.ok) throw new Error((json.errors || []).join('; ') || 'Unknown API error'); return json.data; }
-function post(path, body){return apiFetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})}
-function toast(msg,err=false){const t=document.getElementById('toast');t.hidden=false;t.textContent=msg;t.style.borderColor=err?'var(--red)':'var(--gold)';setTimeout(()=>t.hidden=true,4500)}
-function showMode(id){document.querySelectorAll('.mode').forEach(x=>x.classList.toggle('active',x.id===id));document.querySelectorAll('.nav button').forEach(x=>x.classList.remove('active'));document.getElementById('nav-'+id).classList.add('active'); if(id==='settings') loadDiagnostics(); if(id==='plans') renderPlans();}
-function esc(s){return String(s??'').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]))}
-function pill(v,cls=''){return `<span class="pill ${cls||('risk-'+v)}">${esc(v)}</span>`}
-function renderEmptyState(msg){return `<div class="empty">${esc(msg)}</div>`}
-function renderRecipeCard(r, recommended=false){return `<div class="card ${recommended?'recommended':''}"><h3>${esc(r.title)}</h3><p>${esc(r.summary)}</p><p class="muted">${esc(r.why)}</p><div class="row">${pill(Math.round((r.confidence||0)*100)+'%','info')}${pill(r.risk)}${pill((r.affected_count||0)+' affected')}${pill((r.evidence_count||0)+' evidence')}</div><div class="row"><button class="btn primary" onclick='buildStoryboard(${JSON.stringify(r)})'>Build Storyboard</button><button class="btn" onclick='previewRecipe(${JSON.stringify(r)})'>Preview</button><button class="btn" onclick="toast('Not now recorded')">Not Now</button></div><details><summary>Technical Details</summary><pre>${esc(JSON.stringify(r,null,2))}</pre></details></div>`}
-function renderReviewBlock(b){return `<div class="card"><h3>${esc(b.title)}</h3><p>${esc(b.summary||'Review available')}</p><div class="row">${pill(b.item_count+' items')}${pill(b.risk)}${pill(Math.round((b.confidence||0)*100)+'%','story')}</div><p class="muted small">Why it exists: ${esc((b.metadata?.finding_ids||[]).length)} source finding(s).</p><button class="btn" onclick='buildStoryboardFromBlock(${JSON.stringify(b)})'>Build Story</button><button class="btn" onclick="toast('Details are shown in Technical Details')">View Details</button></div>`}
-function renderStoryboard(s){return `<div class="storyboard"><h2>${esc(s.title)}</h2><p>${esc(s.headline)}</p><div class="progress-rail">${s.progress.map(p=>`<span>${p}</span>`).join('')}</div><h3>What River found</h3><p>${esc(s.found)}</p><h3>What River wants to do</h3><div class="arrow-row"><div class="card">Current folder</div><div>→</div><div class="card">Dry-run review plan</div></div><h3>What will change</h3>${s.will_change.length?'<table class="change-table"><tbody>'+s.will_change.map(x=>`<tr><td>${esc(x)}</td></tr>`).join('')+'</tbody></table>':renderEmptyState('No changes until a plan is previewed and approved.')}<h3>What will NOT be touched</h3><div class="row">${s.will_not_touch.map(x=>pill(x,'safe')).join('')}</div><h3>Safety</h3>${renderSafetyStatus(s.safety)}<footer class="row"><button class="btn primary" onclick="createPlanFromStory()">Approve Plan</button><button class="btn" onclick="toast('Edit is not wired yet')" disabled>Edit — not wired yet</button><button class="btn" onclick="recordDecision('skip')">Skip</button><button class="btn" onclick="recordDecision('defer')">Defer</button><button class="btn" onclick="showMode('home')">Back</button>${state.approved&&!state.preview?.safety?.blockers?.length?'<button class="btn primary" onclick="executeApproved()">Execute</button>':''}</footer><details><summary>Technical Details</summary><pre>${esc(JSON.stringify(s,null,2))}</pre></details></div>`}
-function renderSafetyStatus(s){const blockers=s?.blockers||[]; const cls=blockers.length?'blocked':(s?.status==='preview_required'?'caution':'safe'); return `<div class="card"><span class="pill ${cls}">${blockers.length?'blocked':(s?.status||'safe')}</span>${blockers.length?'<ul>'+blockers.map(b=>`<li>${esc(b)}</li>`).join('')+'</ul>':'<p>Safety preview is clean.</p>'}</div>`}
-function renderActionPlan(p){return `<div class="card"><h3>${esc(p.plan_id)}</h3><div class="row">${pill(p.dry_run?'dry-run':'ready',p.dry_run?'caution':'safe')}${pill(p.approved?'approved':'not approved',p.approved?'safe':'blocked')}${pill((p.steps||[]).length+' steps')}</div><button class="btn" onclick="previewPlan('${p.plan_id}')">Preview</button><button class="btn" onclick="approvePlan('${p.plan_id}')">Approve</button><button class="btn" ${state.approved?'':'disabled'} onclick="executeApproved()">Execute</button></div>`}
-async function scanFolder(){try{state.path=document.getElementById('folderPath').value.trim(); if(!state.path) throw new Error('Choose a folder path first.'); document.getElementById('recommended').innerHTML=renderEmptyState('River is reading this folder. No files are being changed.'); state.scan=await post('/api/scan',{path:state.path}); const next=await apiFetch('/api/recipes/next?path='+encodeURIComponent(state.path)); state.next=next.recipe; state.recipes=[next.recipe,...(next.secondary||[])].filter(Boolean); renderHome(); renderIntelligence(); toast('Scan complete');}catch(e){toast(e.message,true);document.getElementById('recommended').innerHTML=renderEmptyState(e.message)}}
-function useLatest(){if(state.path) document.getElementById('folderPath').value=state.path; else toast('No latest folder yet',true)}
-function renderHome(){document.getElementById('recommended').innerHTML=state.next?renderRecipeCard(state.next,true):renderEmptyState('No recommendation yet.');document.getElementById('secondary').innerHTML=state.recipes.slice(1,4).map(r=>renderRecipeCard(r)).join('')||renderEmptyState('No secondary actions.')}
-async function renderIntelligence(){if(!state.path)return; const [brain,blocks]=await Promise.all([apiFetch('/api/folderbrain?path='+encodeURIComponent(state.path)),apiFetch('/api/review/blocks?path='+encodeURIComponent(state.path))]); document.getElementById('brain').innerHTML=`<h3>${esc(brain.name||'Folder')}</h3><p class="mono small">${esc(brain.path||state.path)}</p><div class="row">${pill(brain.domain||brain.classification||'unknown','story')}${pill(Math.round((brain.confidence||0)*100)+'%','info')}${pill((brain.file_count||brain.inventory?.file_count||0)+' files')}${pill((brain.folder_count||brain.inventory?.folder_count||0)+' folders')}</div><p>${esc(brain.summary||'FolderBrain summary ready.')}</p><details><summary>Technical Details</summary><pre>${esc(JSON.stringify(brain,null,2))}</pre></details>`; document.getElementById('blocks').innerHTML=(blocks.blocks||[]).map(renderReviewBlock).join(''); document.getElementById('findings').innerHTML=(blocks.findings||[]).slice(0,20).map(f=>`<div class="card"><b>${esc(f.title)}</b><p>${esc(f.summary)}</p></div>`).join('')||renderEmptyState('No findings.');}
-async function buildStoryboard(r){try{state.story=await post('/api/storyboard/build',{path:state.path,recipe:r}); document.getElementById('storyboard').innerHTML=renderStoryboard(state.story); toast('Storyboard built')}catch(e){toast(e.message,true)}}
-function buildStoryboardFromBlock(b){buildStoryboard({recipe_id:'recipe_'+b.block_id,block_id:b.block_id,title:b.title,summary:b.summary,why:'Built from review block.',confidence:b.confidence,risk:b.risk,affected_count:b.item_count,evidence_count:(b.metadata?.finding_ids||[]).length,action:(b.suggested_actions||['review'])[0]})}
-async function previewRecipe(r){await buildStoryboard(r); await createPlanFromStory(false)}
-async function createPlanFromStory(show=true){try{const r=state.story.recipe; state.plan=await post('/api/action/plan',{path:state.path,block_id:r.block_id,action:r.action,note:'Created from production storyboard'}); state.preview=await post('/api/action/preview',{plan_id:state.plan.plan_id}); state.story.safety=state.preview.safety; state.story.plan_id=state.plan.plan_id; document.getElementById('storyboard').innerHTML=renderStoryboard(state.story); renderPlans(); if(show) toast('Dry-run plan previewed. Approve separately.')}catch(e){toast(e.message,true)}}
-async function previewPlan(id){state.preview=await post('/api/action/preview',{plan_id:id}); renderPlans(); toast('Preview refreshed')}
-async function approvePlan(id){state.approved=await post('/api/action/approve',{plan_id:id,approved:true}); state.preview=state.approved.safety?{safety:state.approved.safety}:state.preview; if(state.story){state.story.safety=state.approved.safety; document.getElementById('storyboard').innerHTML=renderStoryboard(state.story)} renderPlans(); toast('Plan approved; execute still requires confirmation.')}
-async function executeApproved(){try{if(!confirm('Execute this approved plan? Deletes are disabled.'))return; const out=await post('/api/action/execute',{plan_id:state.plan.plan_id,confirm_execute:true}); await post('/api/preferences/record',{path:state.path,event:'execute_attempt',plan_id:state.plan.plan_id,result:out.executed}); toast(out.executed?'Executed and recorded':'Safety blocked this plan. Nothing was changed.',!out.executed); renderPlans()}catch(e){toast(e.message,true)}}
-function recordDecision(d){post('/api/storyboard/decision',{storyboard_id:state.story?.storyboard_id,decision:d,path:state.path}).then(()=>toast('Decision recorded'))}
-function renderPlans(){document.getElementById('plansList').classList.remove('empty');document.getElementById('plansList').innerHTML=state.plan?renderActionPlan(state.plan)+(state.preview?`<div class="card"><h3>Safety blockers</h3>${renderSafetyStatus(state.preview.safety)}</div>`:''):renderEmptyState('No action plans yet.')}
-const groups={Scope:['Scan','Folder Composition','Compare'],Clean:['Duplicates','Junk / Residue','Delete Later (quarantine only)'],Structure:['Combine','Separate','Link / Hub'],Transform:['Rename','Move','Copy','Archive'],Control:['Review / Approve','Automation','Report']};
-document.getElementById('opTabs').innerHTML=Object.keys(groups).map(g=>`<button class="btn" onclick="selectGroup('${g}')">${g}</button>`).join('');function selectGroup(g){document.getElementById('advancedResults').innerHTML=groups[g].map(x=>`<div class="card"><b>${x}</b><p class="muted">Preview-first. No direct execution.</p></div>`).join('');document.getElementById('selectedOperation').textContent=g+' operation group selected.'}function previewFromAdvanced(){toast('Choose a real review block or storyboard first.',true)}function createPlanFromCurrent(){toast('Advanced creates dry-runs from selected review blocks; selection not wired yet.',true)}function explainCurrentAsStory(){state.next?buildStoryboard(state.next):toast('Scan first.',true)}
-async function loadDiagnostics(){try{const [health,stats,routes]=await Promise.all([apiFetch('/api/health'),apiFetch('/api/stats'),apiFetch('/api/routes')]);document.getElementById('diagnostics').innerHTML=[['Server health',health],['Runtime store counts',stats],['API route registry',routes],['Test commands',{commands:['python scripts/ui_smoke_check.py','python scripts/smoke_api_flow.py','python -m pytest -q','python -m compileall app core engines learning scripts workers tests']}]].map(([t,d])=>`<div class="card"><h3>${t}</h3><pre>${esc(JSON.stringify(d,null,2))}</pre></div>`).join('')}catch(e){toast(e.message,true)}}function exportPrompt(){post('/api/project/export-prompt',{root:'.'}).then(()=>toast('Export requested')).catch(e=>toast(e.message,true))}
-loadDiagnostics().catch(()=>{});
-</script></body></html>
+const STATES = {
+  EMPTY: 'Choose a folder and run Scan.',
+  SCANNING: 'River is reading this folder. No files are being changed.',
+  SCAN_READY: 'River found structure, risks, and possible next actions.',
+  RECIPE_READY: 'River found the most important next action.',
+  STORYBOARD_READY: 'Review the story before approving anything.',
+  PLAN_PREVIEW_READY: 'This is a dry-run preview. Nothing has changed.',
+  PLAN_APPROVED: 'The plan is approved, but not executed.',
+  EXECUTE_READY: 'Safety passed. Execution still requires confirmation.',
+  EXECUTED: 'River executed the approved plan and recorded the result.',
+  BLOCKED: 'Safety blocked this plan. Nothing was changed.',
+  ERROR: 'River hit a problem. Nothing was changed.'
+};
+const state = { uiState:'EMPTY', mode:'home', path:'', lastScan:null, scan:null, brain:null, blocks:[], findings:[], recipes:[], next:null, story:null, plan:null, preview:null, approved:null, decisions:[], logs:[], warnings:[], lastError:'' };
+const groups = { Scope:['Scan','Folder Composition','Compare'], Clean:['Duplicates','Junk / Residue','Delete Later (quarantine only)'], Structure:['Combine','Separate','Link / Hub'], Transform:['Rename','Move','Copy','Archive'], Control:['Review / Approve','Automation','Report'] };
+
+async function apiFetch(path, options = {}) {
+  const res = await fetch(path, { headers: { 'Content-Type': 'application/json', ...(options.headers || {}) }, ...options });
+  let json;
+  try { json = await res.json(); } catch { throw new Error('Server returned non-JSON response'); }
+  if (!json.ok) throw new Error((json.errors || []).join('; ') || 'Unknown API error');
+  return json.data;
+}
+function post(path, body){ return apiFetch(path, { method:'POST', body: JSON.stringify(body || {}) }); }
+function esc(s){ return String(s ?? '').replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+function pill(v, cls=''){ return `<span class="pill ${cls || ('risk-' + String(v).toLowerCase())}">${esc(v)}</span>`; }
+function renderEmptyState(msg){ return `<div class="empty">${esc(msg)}</div>`; }
+function toast(msg, err=false){ const t=document.getElementById('toast'); t.hidden=false; t.textContent=msg; t.style.borderColor=err?'var(--red)':'var(--gold)'; setTimeout(()=>t.hidden=true,4500); }
+function setUiState(next, error=''){ state.uiState=next; state.lastError=error; updateChrome(); }
+function setAsk(text){ document.getElementById('ask').value = text; }
+
+function updateChrome(){
+  document.getElementById('appState').textContent = state.uiState;
+  document.getElementById('appState').className = 'pill ' + (state.uiState === 'ERROR' || state.uiState === 'BLOCKED' ? 'blocked' : state.uiState.includes('APPROVED') || state.uiState === 'EXECUTE_READY' || state.uiState === 'EXECUTED' ? 'safe' : 'info');
+  document.getElementById('stateCopy').textContent = STATES[state.uiState] || STATES.EMPTY;
+  document.getElementById('currentFolder').textContent = state.path || 'No folder selected';
+  document.getElementById('currentMode').textContent = document.getElementById('nav-' + state.mode)?.textContent || 'Home / Story';
+  document.getElementById('lastScan').textContent = state.lastScan || 'never';
+  document.getElementById('railPlan').textContent = state.plan?.plan_id || 'none';
+  document.getElementById('railSafety').textContent = (state.preview?.safety?.allowed === false) ? 'blocked' : (state.preview?.safety?.risk || 'not checked');
+  document.getElementById('railWarnings').textContent = String((state.warnings || []).length);
+  document.getElementById('railError').textContent = state.lastError;
+  document.getElementById('advancedPath').value = state.path;
+}
+function showMode(id){
+  state.mode = id;
+  document.querySelectorAll('.mode').forEach(x => x.classList.toggle('active', x.id === id));
+  document.querySelectorAll('.sidebar button').forEach(x => x.classList.remove('active'));
+  document.getElementById('nav-' + id)?.classList.add('active');
+  if (id === 'diagnostics') loadDiagnostics();
+  if (id === 'plans') renderPlans();
+  if (id === 'advanced') renderAdvancedCenter();
+  updateChrome();
+}
+function openClassicLegacy(){ toast('Classic Legacy is retained as a hidden fallback and is not the production entrypoint.'); }
+
+function renderRecipeCard(r, recommended=false){
+  return `<div class="card ${recommended ? 'recommended' : ''}">
+    <h3>${esc(r.title)}</h3>
+    <p>${esc(r.summary)}</p>
+    <p class="muted">${esc(r.why)}</p>
+    <div class="row">${pill(Math.round((r.confidence||0)*100)+'%', 'info')}${pill(r.risk)}${pill((r.affected_count||0)+' affected')}${pill((r.evidence_count||0)+' evidence')}</div>
+    <div class="row"><button class="btn primary" onclick='buildStoryboard(${JSON.stringify(r)})'>Build Storyboard</button><button class="btn" onclick='previewRecipe(${JSON.stringify(r)})'>Preview</button><button class="btn" onclick="recordNotNow('${esc(r.recipe_id)}')">Not Now</button></div>
+    <details><summary>Details</summary><pre>${esc(JSON.stringify(r,null,2))}</pre></details>
+  </div>`;
+}
+function renderReviewBlock(b){
+  return `<div class="card"><h3>${esc(b.title)}</h3><p>${esc(b.summary || 'River found a reviewable pattern.')}</p><div class="row">${pill((b.item_count||0)+' items')}${pill(b.risk)}${pill(Math.round((b.confidence||0)*100)+'%', 'story')}</div><p class="muted small">Why it exists: ${(b.metadata?.finding_ids || []).length} source finding(s).</p><button class="btn primary" onclick='buildStoryboardFromBlock(${JSON.stringify(b)})'>Build Story</button><button class="btn" onclick='showBlockDetails(${JSON.stringify(b)})'>View Details</button></div>`;
+}
+function renderSafetyStatus(s){
+  const blockers = s?.blockers || [];
+  const warnings = s?.warnings || [];
+  const approvals = s?.required_approvals || [];
+  const cls = blockers.length ? 'blocked' : (approvals.length || warnings.length ? 'caution' : 'safe');
+  return `<div class="card safety-card"><span class="pill ${cls}">${blockers.length ? 'blocked' : (s?.risk || s?.status || 'safe')}</span>
+    ${blockers.length ? '<h4>Blocked because:</h4><ul>'+blockers.map(b=>`<li>${esc(b)}</li>`).join('')+'</ul>' : '<p>Safety preview is clean.</p>'}
+    ${warnings.length ? '<h4>Warnings</h4><ul>'+warnings.map(w=>`<li>${esc(w)}</li>`).join('')+'</ul>' : ''}
+    ${approvals.length ? '<h4>Required approvals</h4><ul>'+approvals.map(a=>`<li>${esc(a)}</li>`).join('')+'</ul>' : ''}
+  </div>`;
+}
+function renderStoryboard(s){
+  const planStatus = state.plan ? (state.plan.approved ? 'approved' : 'dry-run') : 'no plan yet';
+  const executeVisible = Boolean(state.plan && state.plan.approved && state.preview?.safety && !state.preview.safety.blockers?.length);
+  return `<div class="storyboard fade-in">
+    <header class="story-head"><div><h2>${esc(s.title)}</h2><p>${esc(s.headline)}</p></div><div class="row">${pill(s.recipe?.risk || 'low')}${pill(Math.round((s.recipe?.confidence||0)*100)+'%', 'info')}${pill(planStatus, state.plan?.approved ? 'safe' : 'caution')}</div></header>
+    <div class="progress-rail">${s.progress.map(p=>`<span>${esc(p)}</span>`).join('')}</div>
+    <h3>What River found</h3><p>${esc(s.found)}</p>
+    <h3>What River wants to do</h3><div class="arrow-row"><div class="card inset">Current folder scope</div><div class="arrow">→</div><div class="card inset">Dry-run plan with safety review</div></div>
+    <h3>What will change</h3>${renderPlanStepTable()}
+    <h3>What will NOT be touched</h3><div class="row">${s.will_not_touch.map(x=>pill(x,'safe')).join('')}${pill('Anything outside current scope','safe')}</div>
+    <h3>Safety</h3>${renderSafetyStatus(state.preview?.safety || s.safety)}
+    ${state.plan?.approved ? '<p class="pill safe">Plan approved. Nothing has executed yet.</p>' : ''}
+    <footer class="row"><button class="btn primary" onclick="createPlanFromStory()">Preview / Approve Plan</button><button class="btn" disabled>Edit — not wired yet</button><button class="btn" onclick="recordDecision('skip')">Skip</button><button class="btn" onclick="recordDecision('defer')">Defer</button><button class="btn" onclick="showMode('home')">Back</button>${executeVisible ? '<button class="btn primary" onclick="executeApproved()">Execute Approved Plan</button>' : ''}</footer>
+    <details><summary>Technical details</summary><pre>${esc(JSON.stringify({storyboard:s, plan:state.plan, preview:state.preview}, null, 2))}</pre></details>
+  </div>`;
+}
+function renderPlanStepTable(){
+  const steps = state.preview?.steps || state.plan?.steps || [];
+  if (!steps.length) return renderEmptyState('No changes until a plan is previewed and approved.');
+  return `<table class="change-table"><thead><tr><th>Operation</th><th>Source</th><th>Destination / name</th><th>Reason</th></tr></thead><tbody>${steps.map(step=>`<tr><td>${esc(step.operation)}</td><td>${esc(step.source || '')}</td><td>${esc(step.destination || '')}</td><td>${esc(step.reason || '')}</td></tr>`).join('')}</tbody></table>`;
+}
+function renderActionPlan(p){
+  const status = p.approved ? 'approved' : (state.preview ? 'previewed' : 'dry-run');
+  return `<div class="card"><h3>${esc(p.plan_id)}</h3><p class="muted">Source: ${esc(p.source_block_id || state.story?.title || 'story')}</p><div class="row">${pill(status, p.approved?'safe':'caution')}${pill((p.steps||[]).length+' steps')}${pill(state.preview?.safety?.risk || 'risk pending')}</div><div class="row"><button class="btn" onclick="previewPlan('${p.plan_id}')">Preview</button><button class="btn" onclick="openStory()">Open Story</button><button class="btn" onclick="approvePlan('${p.plan_id}')">Approve</button><button class="btn" ${p.approved ? '' : 'disabled'} onclick="executeApproved()">Execute</button><button class="btn" disabled>Archive Plan — not wired yet</button></div></div>`;
+}
+
+async function scanFolder(){
+  try {
+    state.path = document.getElementById('folderPath').value.trim();
+    if (!state.path) throw new Error('Choose a folder path first.');
+    setUiState('SCANNING');
+    document.getElementById('recommended').innerHTML = renderEmptyState(STATES.SCANNING);
+    state.scan = await post('/api/scan', { path: state.path });
+    state.warnings = state.scan.warnings || [];
+    const [next, recipes] = await Promise.all([apiFetch('/api/recipes/next?path=' + encodeURIComponent(state.path)), apiFetch('/api/recipes?path=' + encodeURIComponent(state.path))]);
+    state.next = next.recipe;
+    state.recipes = recipes.recipes || [next.recipe, ...(next.secondary || [])].filter(Boolean);
+    state.lastScan = new Date().toLocaleTimeString();
+    setUiState(state.next ? 'RECIPE_READY' : 'SCAN_READY');
+    renderHome(); await renderIntelligence(); renderAdvancedCenter(); toast('Scan complete. Nothing changed.');
+  } catch (e) { setUiState('ERROR', e.message); toast(e.message, true); document.getElementById('recommended').innerHTML = renderEmptyState(e.message); }
+}
+function useLatest(){ if (state.path) document.getElementById('folderPath').value = state.path; else toast('No latest folder yet.', true); }
+function renderHome(){ if (state.next) storeRecipe(state.next); state.recipes.forEach(r => storeRecipe(r)); document.getElementById('recommended').innerHTML = state.next ? renderRecipeCard(state.next, true) : renderEmptyState('No recommendation yet.'); document.getElementById('secondary').innerHTML = state.recipes.filter(r=>r && r.recipe_id !== state.next?.recipe_id).slice(0,3).map(r=>renderRecipeCard(r)).join('') || renderEmptyState('No secondary actions.'); }
+async function renderIntelligence(){
+  if (!state.path) return;
+  const [brain, blocks] = await Promise.all([apiFetch('/api/folderbrain?path=' + encodeURIComponent(state.path)), apiFetch('/api/review/blocks?path=' + encodeURIComponent(state.path))]);
+  state.brain = brain; state.blocks = blocks.blocks || []; state.findings = blocks.findings || []; state.warnings = blocks.warnings || state.warnings || [];
+  document.getElementById('brain').innerHTML = `<h3>${esc(brain.name || 'Folder')}</h3><p class="mono small">${esc(brain.path || state.path)}</p><div class="row">${pill(brain.domain || brain.classification || 'unknown','story')}${pill(Math.round((brain.confidence||0)*100)+'%','info')}${pill((brain.file_count || brain.inventory?.file_count || 0)+' files')}${pill((brain.folder_count || brain.inventory?.folder_count || 0)+' folders')}${pill('last scan '+(state.lastScan || 'never'))}</div><p>${esc(brain.summary || 'FolderBrain summary ready.')}</p><details><summary>Technical details</summary><pre>${esc(JSON.stringify(brain,null,2))}</pre></details>`;
+  document.getElementById('blocks').innerHTML = state.blocks.map(renderReviewBlock).join('') || renderEmptyState('No review blocks.');
+  document.getElementById('recipeCandidates').innerHTML = state.recipes.slice(0,6).map(r=>renderRecipeCard(r)).join('') || renderEmptyState('No recipes.');
+  document.getElementById('findings').innerHTML = state.findings.slice(0,30).map(f=>`<div class="card"><b>${esc(f.title)}</b><p>${esc(f.summary)}</p><div class="row">${pill(f.finding_type || 'finding')}${pill(f.risk || 'low')}</div></div>`).join('') || renderEmptyState('No findings.');
+  updateChrome();
+}
+async function buildStoryboard(r){ try { state.story = await post('/api/storyboard/build', { path: state.path, recipe: r }); setUiState('STORYBOARD_READY'); document.getElementById('storyboard').innerHTML = renderStoryboard(state.story); toast('Storyboard built. Nothing changed.'); } catch(e){ setUiState('ERROR', e.message); toast(e.message, true); } }
+function buildStoryboardFromBlock(b){ buildStoryboard({ recipe_id:'recipe_'+b.block_id, block_id:b.block_id, title:b.title, summary:b.summary, why:'Built from review block evidence.', confidence:b.confidence, risk:b.risk, affected_count:b.item_count, evidence_count:(b.metadata?.finding_ids||[]).length, action:(b.suggested_actions||['review'])[0] }); }
+async function previewRecipe(r){ await buildStoryboard(r); await createPlanFromStory(false); }
+async function createPlanFromStory(show=true){
+  try {
+    if (!state.story) throw new Error('Build a storyboard first.');
+    const r = state.story.recipe;
+    state.plan = await post('/api/action/plan', { path: state.path, block_id: r.block_id, action: r.action, note:'Created from production storyboard' });
+    state.preview = await post('/api/action/preview', { plan_id: state.plan.plan_id });
+    state.story.plan_id = state.plan.plan_id;
+    setUiState(state.preview?.safety?.blockers?.length ? 'BLOCKED' : 'PLAN_PREVIEW_READY');
+    document.getElementById('storyboard').innerHTML = renderStoryboard(state.story); renderPlans(); if(show) toast('Dry-run preview ready. Nothing changed.');
+  } catch(e){ setUiState('ERROR', e.message); toast(e.message, true); }
+}
+async function previewPlan(id){ state.preview = await post('/api/action/preview', { plan_id:id }); setUiState(state.preview?.safety?.blockers?.length ? 'BLOCKED' : 'PLAN_PREVIEW_READY'); renderPlans(); if(state.story) document.getElementById('storyboard').innerHTML = renderStoryboard(state.story); }
+async function approvePlan(id){ state.approved = await post('/api/action/approve', { plan_id:id, approved:true }); state.plan = state.approved.plan; state.preview = { ...(state.preview || {}), safety: state.approved.safety }; setUiState(state.approved.safety?.blockers?.length ? 'BLOCKED' : 'EXECUTE_READY'); renderPlans(); if(state.story) document.getElementById('storyboard').innerHTML = renderStoryboard(state.story); toast('Plan approved. Nothing has executed yet.'); }
+async function executeApproved(){
+  try {
+    if (!state.plan?.approved) throw new Error('Plan must be approved before execution.');
+    if (state.preview?.safety?.blockers?.length) throw new Error('Safety blockers must be resolved before execution.');
+    const typed = prompt('This will modify files. Nothing will be deleted. Type EXECUTE to continue.');
+    if (typed !== 'EXECUTE') { toast('Execution cancelled. Nothing changed.'); return; }
+    const out = await post('/api/action/execute', { plan_id: state.plan.plan_id, confirm_execute:true });
+    state.logs.unshift({ timestamp:new Date().toISOString(), result:out });
+    await post('/api/preferences/record', { path:state.path, event:'execute_attempt', plan_id:state.plan.plan_id, result:out.executed });
+    setUiState(out.executed ? 'EXECUTED' : 'BLOCKED'); renderPlans(); toast(out.executed ? 'Executed and recorded.' : 'Safety blocked this plan. Nothing was changed.', !out.executed);
+  } catch(e){ setUiState('ERROR', e.message); toast(e.message, true); }
+}
+function recordDecision(decision){ post('/api/storyboard/decision', { storyboard_id:state.story?.storyboard_id, decision, path:state.path }).then(data => { state.decisions.unshift({ timestamp:new Date().toISOString(), decision:data.decision || decision }); renderPlans(); toast('Decision recorded.'); }).catch(e=>toast(e.message,true)); }
+function recordNotNow(recipeId){ post('/api/preferences/record', { path:state.path, event:'not_now', recipe_id:recipeId }).then(()=>toast('Not Now recorded.')).catch(e=>toast(e.message,true)); }
+function showBlockDetails(b){ toast('Details are available in collapsed technical sections.'); console.debug('Review block details', b); }
+function openStory(){ showMode('home'); if(state.story) document.getElementById('storyboard').innerHTML = renderStoryboard(state.story); }
+function renderPlans(){
+  document.getElementById('plansList').classList.remove('empty');
+  document.getElementById('plansList').innerHTML = state.plan ? renderActionPlan(state.plan) + (state.preview ? `<div class="card"><h3>Safety blockers</h3>${renderSafetyStatus(state.preview.safety)}</div>` : '') : renderEmptyState('No action plans yet.');
+  const decisions = state.decisions.map(d=>`<div class="card"><b>${esc(d.timestamp)}</b><pre>${esc(JSON.stringify(d.decision || d,null,2))}</pre></div>`).join('');
+  const logs = state.logs.map(l=>`<div class="card"><b>${esc(l.timestamp)}</b><pre>${esc(JSON.stringify(l.result,null,2))}</pre></div>`).join('');
+  document.getElementById('historyList').innerHTML = decisions + logs || renderEmptyState('No decisions or executor logs yet.');
+  updateChrome();
+}
+
+document.getElementById('opTabs').innerHTML = Object.keys(groups).map(g => `<button class="btn" onclick="selectGroup('${g}')">${g}</button>`).join('');
+function selectGroup(g){ document.getElementById('selectedOperation').textContent = `${g}: ${(groups[g]||[]).join(', ')}`; renderAdvancedCenter(g); }
+function renderAdvancedCenter(group){
+  const view = document.getElementById('viewMode')?.value || 'Folder View';
+  const by = document.getElementById('groupBy')?.value || 'folder';
+  const operations = group ? `<h4>${group}</h4>` + groups[group].map(x=>`<div class="card inset"><b>${esc(x)}</b><p class="muted">Preview-first. No direct execution.</p></div>`).join('') : '';
+  const rows = state.blocks.length ? state.blocks.map(b=>`<div class="card inset"><b>${esc(b.title)}</b><p>${esc(view)} grouped by ${esc(by)} · ${esc(b.item_count)} item(s) · ${esc(b.risk)} risk</p></div>`).join('') : renderEmptyState('Scan a folder to populate Advanced results.');
+  document.getElementById('advancedResults').innerHTML = operations + rows;
+}
+function previewFromAdvanced(){ state.plan ? previewPlan(state.plan.plan_id) : toast('Create or select a dry-run plan first.', true); }
+function createPlanFromCurrent(){ state.next ? buildStoryboard(state.next).then(()=>createPlanFromStory()) : toast('Scan first so Advanced can create a dry-run plan from a real recommendation.', true); }
+function explainCurrentAsStory(){ state.next ? buildStoryboard(state.next) : toast('Scan first.', true); }
+
+async function loadDiagnostics(){
+  try {
+    const [health, stats, routes, prefStats] = await Promise.all([apiFetch('/api/health'), apiFetch('/api/cache/status'), apiFetch('/api/routes'), apiFetch('/api/preferences/stats')]);
+    document.getElementById('diagnosticsGrid').innerHTML = [
+      ['Server health', health], ['Route registry', routes], ['Runtime store counts', stats], ['Preference learning', prefStats],
+      ['Safe operations', { allowed_operations: stats.allowed_operations, blocked_operations: stats.blocked_operations }],
+      ['Test commands', { commands:['python scripts/ui_smoke_check.py','python scripts/smoke_api_flow.py','python -m pytest -q','python -m compileall app core engines learning scripts workers tests'] }]
+    ].map(([t,d]) => `<div class="card"><h3>${t}</h3><pre>${esc(JSON.stringify(d,null,2))}</pre></div>`).join('');
+  } catch(e){ setUiState('ERROR', e.message); toast(e.message, true); }
+}
+function exportPrompt(){ post('/api/project/export-prompt', { root:'.' }).then(()=>toast('Export requested.')).catch(e=>toast(e.message,true)); }
+async function refreshHealth(){ try { const health = await apiFetch('/api/health'); document.getElementById('healthDot').className='health-dot ok'; document.getElementById('healthText').textContent = health.status || 'ok'; } catch { document.getElementById('healthDot').className='health-dot bad'; document.getElementById('healthText').textContent = 'offline'; } }
+
+refreshHealth(); updateChrome(); renderAdvancedCenter();
+</script>
+</body>
+</html>

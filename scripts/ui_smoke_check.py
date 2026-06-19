@@ -13,19 +13,25 @@ for href in re.findall(r'<link[^>]+href="([^"]+)"', html):
     if href.startswith("http"): continue
     local = ROOT / href.lstrip("/")
     if not local.exists(): fail(f"missing css/script reference: {href}")
-fetches = set(re.findall(r"(?:fetch|apiFetch|post)\(\s*['\"]([^'\"]+)", html))
-registered = {r for routes in ROUTES.values() for r in routes}
-for f in fetches:
+fetches_get = set(re.findall(r"apiFetch\(\s*['\"]([ ^'\"]+)", html))
+fetches_post = set(re.findall(r"post\(\s*['\"]([ ^'\"]+)", html))
+registered_get = set(ROUTES.get("GET", []))
+registered_post = set(ROUTES.get("POST", []))
+for f in fetches_get:
     base = f.split("?")[0]
-    if base.startswith("/api/") and base not in registered:
-        fail(f"fetch endpoint not registered: {base}")
-required = {"/api/health","/api/scan","/api/folderbrain","/api/review/blocks","/api/recipes/next","/api/storyboard/build","/api/action/plan","/api/action/preview","/api/action/approve","/api/action/execute","/api/preferences/record"}
+    if base.startswith("/api/") and base not in registered_get:
+        fail(f"GET fetch endpoint not registered: {base}")
+for f in fetches_post:
+    base = f.split("?")[0]
+    if base.startswith("/api/") and base not in registered_post:
+        fail(f"POST fetch endpoint not registered: {base}")
+required = {"/api/health","/api/cache/status","/api/scan","/api/folderbrain","/api/review/blocks","/api/recipes","/api/recipes/next","/api/storyboard/build","/api/storyboard","/api/storyboard/decision","/api/action/plan","/api/action/preview","/api/action/approve","/api/action/execute","/api/preferences/record","/api/preferences/stats"}
 for r in required:
     if r not in html: fail(f"required production endpoint not referenced: {r}")
 handlers = set(re.findall(r"onclick=\"([a-zA-Z_$][\w$]*)\(", html)) | set(re.findall(r"onclick='([a-zA-Z_$][\w$]*)\(", html))
 for h in handlers:
     if not re.search(rf"function\s+{re.escape(h)}\s*\(", html): fail(f"onclick handler missing function: {h}")
-for mode in ["Home / Story","Intelligence","Advanced","Plans / History","Settings / Diagnostics"]:
+for mode in ["Home / Story","Intelligence","Advanced","Plans / History","Diagnostics"]:
     if mode not in html: fail(f"missing mode label: {mode}")
 if errors:
     print("UI smoke check failed:")
