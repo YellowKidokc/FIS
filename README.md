@@ -16,4 +16,18 @@
 python scripts/start.py
 ```
 
-Open `http://127.0.0.1:8450/` for the current River UI. See `docs/RUNBOOK.md` for API, diagnostics, and smoke-flow commands.
+Open `http://127.0.0.1:61845/` for the current River UI. See `docs/RUNBOOK.md` for API, diagnostics, and smoke-flow commands.
+
+## Windows startup
+
+To launch File Intelligence System on Windows sign-in:
+
+```bat
+install_startup_fis.bat
+```
+
+This installs a Startup entry that:
+
+- starts the Python server on `61845`
+- waits briefly
+- opens `http://127.0.0.1:61845/`

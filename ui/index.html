@@ -3,14 +3,14 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>River FIS</title>
+  <title>File Intelligence System</title>
   <link rel="stylesheet" href="/ui/styles/river.css">
   <link rel="stylesheet" href="/ui/styles/storyboard.css">
 </head>
 <body>
   <div class="app-shell">
     <header class="topbar">
-      <div class="brand">RIVER <span>FIS</span></div>
+      <div class="brand">FILE <span>INTELLIGENCE SYSTEM</span></div>
       <div class="top-meta">
         <span class="health-dot" id="healthDot"></span><span id="healthText">checking server</span>
         <span class="meta-item mono" id="currentFolder">No folder selected</span>
@@ -31,37 +31,31 @@
 
     <main class="content">
       <section class="hero compact">
-        <h1>River FIS</h1>
-        <p class="muted">One folder. One guided action.</p>
+        <h1>File Intelligence System</h1>
+        <p class="muted">Folder analysis, anomaly review, and guarded action planning.</p>
         <div class="state-strip"><span id="appState" class="pill info">EMPTY</span><span id="stateCopy">Choose a folder and run Scan.</span></div>
         <div class="bar">
           <input id="folderPath" placeholder="Folder path">
           <button class="btn primary" onclick="scanFolder()">Scan</button>
           <button class="btn" onclick="useLatest()">Use Latest</button>
         </div>
-        <textarea id="ask" placeholder="Ask River: clean this folder, fix names, find duplicates, sort by type, build hub, or just tell me what this is"></textarea>
-        <div class="chips">
-          <button onclick="setAsk('Clean duplicates')">Clean duplicates</button>
-          <button onclick="setAsk('Fix names')">Fix names</button>
-          <button onclick="setAsk('Sort by type')">Sort by type</button>
-          <button onclick="setAsk('Build hub')">Build hub</button>
-          <button onclick="setAsk('Just tell me what this is')">Just tell me what this is</button>
-        </div>
       </section>
 
       <section id="home" class="mode active">
+        <h2>Folder Snapshot</h2>
+        <div id="summaryMetrics" class="grid cols-3"></div>
         <div class="grid cols-2">
           <div>
-            <h2>Recommended action</h2>
+            <h3>Anomalies</h3>
             <div id="recommended" class="empty">Choose a folder and run Scan.</div>
-            <h3>Other useful actions</h3>
-            <div id="secondary" class="grid cols-3"></div>
           </div>
           <div>
-            <h2>Storyboard</h2>
-            <div id="storyboard" class="empty">Build a storyboard from a recommendation. No files are changed.</div>
+            <h3>Secondary review lanes</h3>
+            <div id="secondary" class="grid"></div>
           </div>
         </div>
+        <h2>Storyboard</h2>
+        <div id="storyboard" class="empty">Scan a folder and the system will stage the next action here.</div>
       </section>
 
       <section id="intelligence" class="mode">
@@ -145,18 +139,18 @@
 <script>
 const STATES = {
   EMPTY: 'Choose a folder and run Scan.',
-  SCANNING: 'River is reading this folder. No files are being changed.',
-  SCAN_READY: 'River found structure, risks, and possible next actions.',
-  RECIPE_READY: 'River found the most important next action.',
+  SCANNING: 'The system is reading this folder. No files are being changed.',
+  SCAN_READY: 'The scan found structure, risks, and possible next actions.',
+  RECIPE_READY: 'The scan found the strongest next action.',
   STORYBOARD_READY: 'Review the story before approving anything.',
   PLAN_PREVIEW_READY: 'This is a dry-run preview. Nothing has changed.',
   PLAN_APPROVED: 'The plan is approved, but not executed.',
   EXECUTE_READY: 'Safety passed. Execution still requires confirmation.',
-  EXECUTED: 'River executed the approved plan and recorded the result.',
+  EXECUTED: 'The approved plan was executed and recorded.',
   BLOCKED: 'Safety blocked this plan. Nothing was changed.',
-  ERROR: 'River hit a problem. Nothing was changed.'
+  ERROR: 'The system hit a problem. Nothing was changed.'
 };
-const state = { uiState:'EMPTY', mode:'home', path:'', lastScan:null, scan:null, brain:null, blocks:[], findings:[], recipes:[], next:null, story:null, plan:null, preview:null, approved:null, decisions:[], logs:[], warnings:[], lastError:'' };
+const state = { uiState:'EMPTY', mode:'home', path:'', lastScan:null, scan:null, scanJob:null, brain:null, blocks:[], findings:[], recipes:[], next:null, story:null, plan:null, preview:null, approved:null, decisions:[], logs:[], warnings:[], lastError:'' };
 const groups = { Scope:['Scan','Folder Composition','Compare'], Clean:['Duplicates','Junk / Residue','Delete Later (quarantine only)'], Structure:['Combine','Separate','Link / Hub'], Transform:['Rename','Move','Copy','Archive'], Control:['Review / Approve','Automation','Report'] };
 
 async function apiFetch(path, options = {}) {
@@ -172,7 +166,6 @@ function pill(v, cls=''){ return `<span class="pill ${cls || ('risk-' + String(v
 function renderEmptyState(msg){ return `<div class="empty">${esc(msg)}</div>`; }
 function toast(msg, err=false){ const t=document.getElementById('toast'); t.hidden=false; t.textContent=msg; t.style.borderColor=err?'var(--red)':'var(--gold)'; setTimeout(()=>t.hidden=true,4500); }
 function setUiState(next, error=''){ state.uiState=next; state.lastError=error; updateChrome(); }
-function setAsk(text){ document.getElementById('ask').value = text; }
 
 function updateChrome(){
   document.getElementById('appState').textContent = state.uiState;
@@ -210,7 +203,7 @@ function renderRecipeCard(r, recommended=false){
   </div>`;
 }
 function renderReviewBlock(b){
-  return `<div class="card"><h3>${esc(b.title)}</h3><p>${esc(b.summary || 'River found a reviewable pattern.')}</p><div class="row">${pill((b.item_count||0)+' items')}${pill(b.risk)}${pill(Math.round((b.confidence||0)*100)+'%', 'story')}</div><p class="muted small">Why it exists: ${(b.metadata?.finding_ids || []).length} source finding(s).</p><button class="btn primary" onclick='buildStoryboardFromBlock(${JSON.stringify(b)})'>Build Story</button><button class="btn" onclick='showBlockDetails(${JSON.stringify(b)})'>View Details</button></div>`;
+  return `<div class="card"><h3>${esc(b.title)}</h3><p>${esc(b.summary || 'The scan found a reviewable pattern.')}</p><div class="row">${pill((b.item_count||0)+' items')}${pill(b.risk)}${pill(Math.round((b.confidence||0)*100)+'%', 'story')}</div><p class="muted small">Why it exists: ${(b.metadata?.finding_ids || []).length} source finding(s).</p><button class="btn primary" onclick='buildStoryboardFromBlock(${JSON.stringify(b)})'>Build Story</button><button class="btn" onclick='showBlockDetails(${JSON.stringify(b)})'>View Details</button></div>`;
 }
 function renderSafetyStatus(s){
   const blockers = s?.blockers || [];
@@ -229,8 +222,8 @@ function renderStoryboard(s){
   return `<div class="storyboard fade-in">
     <header class="story-head"><div><h2>${esc(s.title)}</h2><p>${esc(s.headline)}</p></div><div class="row">${pill(s.recipe?.risk || 'low')}${pill(Math.round((s.recipe?.confidence||0)*100)+'%', 'info')}${pill(planStatus, state.plan?.approved ? 'safe' : 'caution')}</div></header>
     <div class="progress-rail">${s.progress.map(p=>`<span>${esc(p)}</span>`).join('')}</div>
-    <h3>What River found</h3><p>${esc(s.found)}</p>
-    <h3>What River wants to do</h3><div class="arrow-row"><div class="card inset">Current folder scope</div><div class="arrow">→</div><div class="card inset">Dry-run plan with safety review</div></div>
+    <h3>What the scan found</h3><p>${esc(s.found)}</p>
+    <h3>Planned next action</h3><div class="arrow-row"><div class="card inset">Current folder scope</div><div class="arrow">→</div><div class="card inset">Dry-run plan with safety review</div></div>
     <h3>What will change</h3>${renderPlanStepTable()}
     <h3>What will NOT be touched</h3><div class="row">${s.will_not_touch.map(x=>pill(x,'safe')).join('')}${pill('Anything outside current scope','safe')}</div>
     <h3>Safety</h3>${renderSafetyStatus(state.preview?.safety || s.safety)}
@@ -248,14 +241,97 @@ function renderActionPlan(p){
   const status = p.approved ? 'approved' : (state.preview ? 'previewed' : 'dry-run');
   return `<div class="card"><h3>${esc(p.plan_id)}</h3><p class="muted">Source: ${esc(p.source_block_id || state.story?.title || 'story')}</p><div class="row">${pill(status, p.approved?'safe':'caution')}${pill((p.steps||[]).length+' steps')}${pill(state.preview?.safety?.risk || 'risk pending')}</div><div class="row"><button class="btn" onclick="previewPlan('${p.plan_id}')">Preview</button><button class="btn" onclick="openStory()">Open Story</button><button class="btn" onclick="approvePlan('${p.plan_id}')">Approve</button><button class="btn" ${p.approved ? '' : 'disabled'} onclick="executeApproved()">Execute</button><button class="btn" disabled>Archive Plan — not wired yet</button></div></div>`;
 }
+function fmtInt(n){ return new Intl.NumberFormat().format(Number(n || 0)); }
+function fmtBytes(n){
+  let size = Number(n || 0);
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  let idx = 0;
+  while (size >= 1024 && idx < units.length - 1) { size /= 1024; idx += 1; }
+  return `${size.toFixed(idx === 0 ? 0 : 1)} ${units[idx]}`;
+}
+function metricCard(label, value, note=''){
+  return `<div class="card"><div class="muted small">${esc(label)}</div><div style="font-size:28px;font-weight:800;margin:6px 0 4px;">${esc(value)}</div>${note ? `<div class="muted small">${esc(note)}</div>` : ''}</div>`;
+}
+function renderSummaryMetrics(){
+  const inv = state.brain?.inventory || state.scan || {};
+  const classification = state.brain?.classification || {};
+  const topExtensions = Object.entries(inv.top_extensions || {}).slice(0, 3).map(([ext, count]) => `${ext} ${fmtInt(count)}`).join(' · ') || 'none yet';
+  const anomalyCount =
+    (inv.tiny_folders || []).length +
+    (inv.zero_byte_files || []).length +
+    (inv.odd_files || []).length +
+    (inv.large_files || []).length;
+  document.getElementById('summaryMetrics').innerHTML = [
+    metricCard('Files', fmtInt(inv.file_count), topExtensions),
+    metricCard('Folders', fmtInt(inv.folder_count), `${fmtBytes(inv.total_size)} total`),
+    metricCard('Dominant domain', classification.domain || inv.dominant_domain || 'mixed', `${Math.round(classification.confidence || 0)}% confidence`),
+    metricCard('Tiny / empty folders', fmtInt((inv.tiny_folders || []).length), '0-2 direct files'),
+    metricCard('Zero-byte files', fmtInt((inv.zero_byte_files || []).length), 'possible broken saves or placeholders'),
+    metricCard('Oddities', fmtInt(anomalyCount), 'outliers, large files, and residue to review'),
+  ].join('');
+}
+function buildAutoStoryboard(){
+  if (!state.next) return null;
+  return {
+    title: state.next.title,
+    headline: 'The system staged the strongest next action from the scan. Nothing changes until you approve and execute.',
+    recipe: state.next,
+    progress: ['Found', 'Preview', 'Safety', 'Approve', 'Execute', 'Record'],
+    found: state.next.summary || 'The scan found a reviewable pattern.',
+    will_not_touch: ['Protected folders', 'Database files', 'System folders', 'Unknown risky items', 'Deletes'],
+    safety: state.preview?.safety || { status: 'preview_required', blockers: ['Preview the plan before approval.'] },
+  };
+}
+function renderAnomalyCard(title, items, note, action){
+  if (!items.length) return '';
+  const sample = items.slice(0, 5).map(item => item.name || item.path || '').filter(Boolean);
+  return `<div class="card">
+    <h3>${esc(title)}</h3>
+    <p>${esc(note)}</p>
+    <div class="row">${pill(`${items.length} item(s)`, 'caution')}${action ? pill(action, 'story') : ''}</div>
+    ${sample.length ? `<div class="muted small">${sample.map(esc).join(' · ')}</div>` : ''}
+  </div>`;
+}
+function renderScanProgress(job){
+  const steps = (job.events || []).slice(-8);
+  const percent = job.total ? Math.max(5, Math.round((job.current / job.total) * 100)) : 5;
+  return `<div class="card">
+    <h3>Scan in progress</h3>
+    <p>${esc(job.current_label || 'The system is scanning this folder.')}</p>
+    <div style="height:10px;background:#18161f;border:1px solid #343040;border-radius:999px;overflow:hidden;margin:12px 0;">
+      <div style="height:100%;width:${percent}%;background:linear-gradient(90deg,var(--gold),#f4d98a);transition:width .25s ease;"></div>
+    </div>
+    <div class="row">${pill(job.status || 'running','info')}${pill(`${job.current || 0}/${job.total || '?'}`,'story')}${pill(job.path || state.path,'info')}</div>
+    <div class="progress-rail">${steps.map(s=>`<span>${esc(s.label || s.stage || 'working')}</span>`).join('')}</div>
+    <p class="muted small">Nothing is being changed while the scan runs.</p>
+  </div>`;
+}
+async function pollScanJob(jobId){
+  while (true) {
+    const job = await apiFetch('/api/scan/status?id=' + encodeURIComponent(jobId));
+    state.scanJob = job;
+    document.getElementById('recommended').innerHTML = renderScanProgress(job);
+    if (state.mode === 'intelligence') {
+      document.getElementById('brain').innerHTML = renderScanProgress(job);
+    }
+    updateChrome();
+    if (job.status === 'complete') return job.result;
+    if (job.status === 'error') throw new Error(job.error || 'Scan failed');
+    await new Promise(resolve => setTimeout(resolve, 450));
+  }
+}
 
 async function scanFolder(){
   try {
     state.path = document.getElementById('folderPath').value.trim();
     if (!state.path) throw new Error('Choose a folder path first.');
     setUiState('SCANNING');
+    state.scanJob = null;
     document.getElementById('recommended').innerHTML = renderEmptyState(STATES.SCANNING);
-    state.scan = await post('/api/scan', { path: state.path });
+    const queued = await post('/api/scan', { path: state.path, async: true });
+    state.scanJob = queued;
+    document.getElementById('recommended').innerHTML = renderScanProgress({ ...queued, events: [], current: 0, total: 0, current_label: 'Starting scan' });
+    state.scan = await pollScanJob(queued.job_id);
     state.warnings = state.scan.warnings || [];
     const [next, recipes] = await Promise.all([apiFetch('/api/recipes/next?path=' + encodeURIComponent(state.path)), apiFetch('/api/recipes?path=' + encodeURIComponent(state.path))]);
     state.next = next.recipe;
@@ -266,7 +342,26 @@ async function scanFolder(){
   } catch (e) { setUiState('ERROR', e.message); toast(e.message, true); document.getElementById('recommended').innerHTML = renderEmptyState(e.message); }
 }
 function useLatest(){ if (state.path) document.getElementById('folderPath').value = state.path; else toast('No latest folder yet.', true); }
-function renderHome(){ if (state.next) storeRecipe(state.next); state.recipes.forEach(r => storeRecipe(r)); document.getElementById('recommended').innerHTML = state.next ? renderRecipeCard(state.next, true) : renderEmptyState('No recommendation yet.'); document.getElementById('secondary').innerHTML = state.recipes.filter(r=>r && r.recipe_id !== state.next?.recipe_id).slice(0,3).map(r=>renderRecipeCard(r)).join('') || renderEmptyState('No secondary actions.'); }
+function renderHome(){
+  renderSummaryMetrics();
+  const inv = state.brain?.inventory || state.scan || {};
+  const anomalyCards = [
+    renderAnomalyCard('Tiny or empty folders', inv.tiny_folders || [], 'These are low-volume folders that may be fragments, placeholders, or cleanup candidates.', 'merge or protect'),
+    renderAnomalyCard('Zero-byte files', inv.zero_byte_files || [], 'These are empty files and often deserve a quick review.', 'review empty files'),
+    renderAnomalyCard('Odd file types', inv.odd_files || [], 'These files do not match the dominant folder pattern.', 'review outliers'),
+    renderAnomalyCard('Large files', inv.large_files || [], 'These are unusually large and may need intentional placement.', 'review large files'),
+  ].filter(Boolean).join('');
+  document.getElementById('recommended').innerHTML = anomalyCards || renderEmptyState('No obvious anomalies were found in this scan.');
+  document.getElementById('secondary').innerHTML = state.recipes
+    .filter(r => r && r.recipe_id !== state.next?.recipe_id)
+    .slice(0, 3)
+    .map(r => renderRecipeCard(r))
+    .join('') || renderEmptyState('No secondary review lanes.');
+  const activeStory = state.story || buildAutoStoryboard();
+  document.getElementById('storyboard').innerHTML = activeStory
+    ? renderStoryboard(activeStory)
+    : renderEmptyState('No storyboard yet.');
+}
 async function renderIntelligence(){
   if (!state.path) return;
   const [brain, blocks] = await Promise.all([apiFetch('/api/folderbrain?path=' + encodeURIComponent(state.path)), apiFetch('/api/review/blocks?path=' + encodeURIComponent(state.path))]);

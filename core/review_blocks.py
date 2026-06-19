@@ -16,6 +16,8 @@ BLOCK_MAP = {
     "tiny_folder": ("tiny_folder", "Tiny Folder Review", 5, ["merge_candidates", "archive_empty", "keep_as_protected"]),
     "empty_folder": ("tiny_folder", "Tiny Folder Review", 5, ["merge_candidates", "archive_empty", "keep_as_protected"]),
     "large_file": ("large_files", "Large Files Review", 3, ["review_large_files", "archive_large_files", "keep_in_place"]),
+    "zero_byte_file": ("zero_byte_files", "Zero-byte Files Review", 7, ["review_zero_byte_files", "archive_residue", "keep_in_place"]),
+    "odd_file_type": ("odd_file_types", "Odd File Type Review", 6, ["review_outliers", "keep_in_place", "split_by_theme"]),
     "junk_residue": ("junk_residue", "Junk / Residue Review", 7, ["review_junk", "archive_residue", "skip_cleanup"]),
     "similar_hub": ("similar_hub", "Similar Hubs", 6, ["find_similar", "create_hub_page", "link_dont_move"]),
     "folder_template": ("folder_template", "Folder Template", 4, ["preview_template", "create_missing_folders", "skip_template"]),

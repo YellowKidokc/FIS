@@ -4,6 +4,7 @@ from core.models import ActionPlan, SafetyResult
 
 PROTECTED_NAMES = {".git", ".venv", "venv", "env", "node_modules", "__pycache__", "_gsdata_"}
 PROTECTED_FILES = {"preference_engine.db", "sorter_cache.sqlite"}
+LEDGER_SUFFIXES = {".meqlog", ".orgledger"}
 DB_SUFFIXES = {".db", ".sqlite", ".sqlite3"}
 SYSTEM_MARKERS = ("windows", "program files", "program files (x86)")
 SUPPORTED_OPERATIONS = {"create_folder", "write_folderbrain", "rename", "move", "copy", "archive", "zip_backup", "tag", "protect", "link_hub", "delete"}
@@ -13,6 +14,8 @@ GUARDED_NOT_IMPLEMENTED = {"rename", "move", "archive", "tag"}
 def _parts(path: str | None) -> list[str]: return [p.lower() for p in Path(path or "").parts]
 def _is_protected(path: str | None) -> bool:
     parts = _parts(path)
+    if path and Path(path).suffix.lower() in LEDGER_SUFFIXES:
+        return True
     return any(p in PROTECTED_NAMES for p in parts) or (parts and parts[-1] in PROTECTED_FILES) or any(m in "\\".join(parts) for m in SYSTEM_MARKERS)
 def _is_db(path: str | None) -> bool: return bool(path and Path(path).suffix.lower() in DB_SUFFIXES)
 

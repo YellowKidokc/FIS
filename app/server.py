@@ -2,6 +2,7 @@ from __future__ import annotations
 import json
 import mimetypes
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
@@ -16,11 +17,83 @@ from core.storyboards import build_storyboard, to_dict as storyboard_to_dict
 
 _LAST = {"plans": {}, "blocks": {}, "results": {}, "decisions": [], "storyboards": {}, "executor_logs": []}
 _LOCK = threading.Lock()
+_SCAN_JOBS: dict[str, dict] = {}
+_SCAN_JOB_SEQ = 0
 
 ROUTES = {
-    "GET": ["/", "/api/health", "/api/routes", "/api/cache/status", "/api/stats", "/api/scan", "/api/folderbrain", "/api/review/blocks", "/api/review/block", "/api/findings", "/api/recipes", "/api/recipes/next", "/api/storyboard", "/api/preferences/stats"],
+    "GET": ["/", "/api/health", "/api/routes", "/api/cache/status", "/api/stats", "/api/scan", "/api/scan/status", "/api/folderbrain", "/api/review/blocks", "/api/review/block", "/api/findings", "/api/recipes", "/api/recipes/next", "/api/storyboard", "/api/preferences/stats"],
     "POST": ["/api/scan", "/api/storyboard/build", "/api/storyboard/decision", "/api/action/plan", "/api/action/preview", "/api/action/approve", "/api/action/execute", "/api/preferences/record", "/api/project/export-prompt"],
 }
+
+
+def _new_scan_job(path: str) -> dict:
+    global _SCAN_JOB_SEQ
+    with _LOCK:
+        _SCAN_JOB_SEQ += 1
+        job_id = f"scan_{_SCAN_JOB_SEQ:05d}"
+        job = {
+            "job_id": job_id,
+            "path": path,
+            "status": "queued",
+            "created_at": time.time(),
+            "updated_at": time.time(),
+            "current_stage": "queued",
+            "current_label": "Queued",
+            "current": 0,
+            "total": 0,
+            "events": [],
+            "result": None,
+            "error": None,
+        }
+        _SCAN_JOBS[job_id] = job
+        return dict(job)
+
+
+def _update_scan_job(job_id: str, **updates):
+    with _LOCK:
+        job = _SCAN_JOBS.get(job_id)
+        if not job:
+            return
+        job.update(updates)
+        job["updated_at"] = time.time()
+
+
+def _append_scan_event(job_id: str, event: dict):
+    with _LOCK:
+        job = _SCAN_JOBS.get(job_id)
+        if not job:
+            return
+        event = dict(event)
+        event["at"] = time.time()
+        job["events"].append(event)
+        job["current_stage"] = event.get("stage", job["current_stage"])
+        job["current_label"] = event.get("label", job["current_label"])
+        job["current"] = event.get("current", job["current"])
+        job["total"] = event.get("total", job["total"])
+        job["status"] = "running"
+        job["updated_at"] = time.time()
+
+
+def _scan_job_snapshot(job_id: str) -> dict | None:
+    with _LOCK:
+        job = _SCAN_JOBS.get(job_id)
+        return dict(job) if job else None
+
+
+def _run_scan_job(job_id: str, path: str, options=None):
+    _update_scan_job(job_id, status="running", current_stage="starting", current_label="Starting scan")
+    try:
+        result = run_folder_intelligence(path, options, progress_callback=lambda event: _append_scan_event(job_id, event))
+        if result.get("error"):
+            _update_scan_job(job_id, status="error", error=result["error"], result=result)
+            return
+        with _LOCK:
+            _LAST["results"][path] = result
+            for block in result["review_blocks"]:
+                _LAST["blocks"][block["block_id"]] = block
+        _update_scan_job(job_id, status="complete", result=result, current_stage="complete", current_label="Scan complete")
+    except Exception as exc:
+        _update_scan_job(job_id, status="error", error=str(exc))
 
 def envelope(data=None, warnings=None, errors=None, ok=None):
     errs = errors or []
@@ -141,6 +214,12 @@ class RiverHandler(BaseHTTPRequestHandler):
                 for block in result["review_blocks"]:
                     _LAST["blocks"][block["block_id"]] = block
         return result
+    def _run(self, path: str, options=None):
+        with _LOCK:
+            cached = _LAST["results"].get(path)
+        if cached is not None and options in (None, {}):
+            return cached
+        return self._scan(path, options)
     def do_GET(self):
         parsed = urlparse(self.path); qs = parse_qs(parsed.query); path = self._path_from(qs)
         if parsed.path == "/": return _send_file(self, Path(__file__).resolve().parents[1] / "ui" / "index.html")
@@ -164,6 +243,10 @@ class RiverHandler(BaseHTTPRequestHandler):
                 return
         if parsed.path == "/api/health": return _send(self, {"service": "River FIS", "guided": True, "status": "ok"})
         if parsed.path == "/api/routes": return _send(self, {"routes": ROUTES})
+        if parsed.path == "/api/scan/status":
+            job_id = qs.get("id", [""])[0]
+            job = _scan_job_snapshot(job_id)
+            return _send(self, job if job else {"error": "scan job not found"}, 200 if job else 404)
         if parsed.path == "/api/preferences/stats":
             with _LOCK:
                 dec_len = len(_LAST["decisions"])
@@ -205,6 +288,11 @@ class RiverHandler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path); body = self._body(); qs = parse_qs(parsed.query); path = self._path_from(qs, body)
         if parsed.path == "/api/scan":
             if not path: return _send(self, {"error": "path is required"}, 400)
+            if body.get("async"):
+                job = _new_scan_job(path)
+                worker = threading.Thread(target=_run_scan_job, args=(job["job_id"], path, body.get("options")), daemon=True)
+                worker.start()
+                return _send(self, {"job_id": job["job_id"], "status": "queued", "path": path})
             return _send(self, self._run(path, body.get("options")))
         if parsed.path == "/api/storyboard/build":
             recipe = body.get("recipe") or next((r for r in _recipes_for(path) if r["recipe_id"] == body.get("recipe_id")), None)
@@ -252,7 +340,7 @@ class RiverHandler(BaseHTTPRequestHandler):
             return _send(self, export_project_prompt(body.get("root", "."), body.get("output", "FIS_PROJECT_CONTEXT.md")))
         return _send(self, {"error": "not found"}, 404)
 
-def run(host="127.0.0.1", port=8450):
+def run(host="127.0.0.1", port=61845):
     print(f"River FIS running at http://{host}:{port}/")
     ThreadingHTTPServer((host, port), RiverHandler).serve_forever()
 if __name__ == "__main__": run()

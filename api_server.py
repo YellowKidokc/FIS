@@ -1,6 +1,6 @@
 """API Server — bridges the GUI to the classification + preference engine.
 
-Runs on port 8450. The React GUI talks to this via HTTP.
+Runs on port 61845. The React GUI talks to this via HTTP.
 
 Endpoints:
   GET  /api/scan?path=...&top=true    — classify files, return JSON
@@ -1188,7 +1188,7 @@ class SorterAPI(BaseHTTPRequestHandler):
 
 def main():
     init_db()
-    port = int(sys.argv[1]) if len(sys.argv) > 1 else 8450
+    port = int(sys.argv[1]) if len(sys.argv) > 1 else 61845
     server = ThreadingHTTPServer(('127.0.0.1', port), SorterAPI)
     print(f"\n  File Sorter API running on http://127.0.0.1:{port}")
     print(f"  Simple Mode: http://127.0.0.1:{port}/simple")

@@ -18,16 +18,16 @@ python scripts/start.py
 Default server:
 
 - Host: `127.0.0.1`
-- Port: `8450`
-- UI: `http://127.0.0.1:8450/`
+- Port: `61845`
+- UI: `http://127.0.0.1:61845/`
 - Static directory: `ui/`
-- API base: `http://127.0.0.1:8450/api`
+- API base: `http://127.0.0.1:61845/api`
 - Active served UI: `ui/index.html`; `ui/simple.html` is also available as `/simple.html`.
 
 ## Run a scan through the API
 
 ```bash
-curl -X POST http://127.0.0.1:8450/api/scan \
+curl -X POST http://127.0.0.1:61845/api/scan \
   -H 'Content-Type: application/json' \
   -d '{"path":"/path/to/folder"}'
 ```
