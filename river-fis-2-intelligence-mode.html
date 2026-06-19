@@ -627,7 +627,7 @@ body {
     </div>
     <div class="brand">RIVER <span>FIS</span></div>
     <div class="titlebar-right">
-      <div class="mode-label">Mode: <strong>River Intelligence</strong></div>
+      <div class="mode-label">Mode: <strong>File Intelligence System</strong></div>
       <div class="api-status">API connected</div>
     </div>
   </div>
@@ -635,8 +635,8 @@ body {
   <!-- Engines -->
   <div class="engines">
     <div class="engine">Manual Sort</div>
-    <div class="engine active">File Intelligence Sort <span class="badge">FIS</span></div>
-    <div class="engine">Advanced Sort</div>
+    <div class="engine active">File Intelligence System <span class="badge">FIS</span></div>
+    <div class="engine">Advanced Workbench</div>
     <div class="engine">File Creation Automation</div>
   </div>
 
@@ -673,10 +673,10 @@ body {
   <!-- Commit bar -->
   <div class="commit-bar">
     <div>
-      <div class="commit-summary"><strong id="commitSummaryText">Working through River's recommendations…</strong></div>
+      <div class="commit-summary"><strong id="commitSummaryText">Working through FIS preview-only recommendations…</strong></div>
       <div class="commit-progress" id="commitProgress">0 of 5 stages accepted</div>
     </div>
-    <button class="commit-btn" id="commitBtn" disabled onclick="executeAll()">Approve &amp; Execute</button>
+    <button class="commit-btn" id="commitBtn" disabled onclick="executeAll()">Simulate &amp; Approve</button>
   </div>
 
 </div>
@@ -910,6 +910,38 @@ const STAGES = [
   },
 ];
 
+
+const API_BASE = localStorage.getItem('fisApiBase') || 'http://localhost:8420';
+let activeScan = JSON.parse(sessionStorage.getItem('fis_scan_summary') || localStorage.getItem('fis_scan_summary') || 'null');
+let acceptedPlanIds = [];
+async function apiPost(path, payload) {
+  const res = await fetch(`${API_BASE}${path}`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)});
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || path + ' failed');
+  return data;
+}
+function activeScanId() { return sessionStorage.getItem('fis_scan_id') || localStorage.getItem('fis_scan_id') || (activeScan && activeScan.scan_id); }
+async function requestPlan(idx) {
+  const st = state[idx];
+  const scan_id = activeScanId();
+  if (!scan_id) return null;
+  try {
+    st.plan = await apiPost('/api/plan/simple', {scan_id, stage: STAGES[idx].id, attempt: st.attempt + 1, previous_rejections: st.rejections || []});
+    return st.plan;
+  } catch (err) {
+    console.warn(err);
+    return null;
+  }
+}
+async function requestCustomPlan(idx) {
+  const text = document.getElementById(`askFisText-${idx}`).value.trim();
+  if (!text) return alert('Tell File Intelligence System what you want done.');
+  try {
+    state[idx].plan = await apiPost('/api/plan/custom', {scan_id: activeScanId(), stage: STAGES[idx].id, user_request: text, previous_rejections: state[idx].rejections || []});
+    render();
+  } catch (err) { alert('Ask FIS failed: ' + err.message); }
+}
+
 // ===== State =====
 const state = STAGES.map(s => ({
   id: s.id,
@@ -917,6 +949,9 @@ const state = STAGES.map(s => ({
   attempt: 0,          // 0 = Option A, 1 = B, 2 = C
   accepted: false,
   expanded: false,     // for re-opened complete stages
+  plan: null,
+  askFis: false,
+  rejections: [],
 }));
 state[0].status = 'active';
 
@@ -933,6 +968,7 @@ function renderStage(idx) {
   const st = state[idx];
   const opt = s.options[st.attempt];
   const triesLeft = 2 - st.attempt;
+  const plan = st.plan;
 
   let body = '';
   if (st.status !== 'locked') {
@@ -955,7 +991,7 @@ function renderStage(idx) {
       body += `<div class="attempt-pill">Attempt ${st.attempt + 1} of 3</div>`;
       body += '</div>';
       body += '<div class="rules-list">';
-      opt.rules.forEach(r => {
+      (plan ? plan.understood.map((u, i) => ['Understood ' + (i + 1), u]) : opt.rules).forEach(r => {
         body += `<div class="rule-row"><div class="rule-lbl">${r[0]}</div><div class="rule-val">${r[1]}</div></div>`;
       });
       body += '</div>';
@@ -968,19 +1004,20 @@ function renderStage(idx) {
       body += '<div class="rec-card" style="border-color: var(--green); background: linear-gradient(180deg, var(--green-dim), rgba(52,211,153,0.02));">';
       body += `<div class="rec-card-title" style="color: var(--green);"><span class="rec-card-letter" style="background: var(--green); color: #002418;">${letterFor(st.attempt)}</span>${attemptText(st.attempt)} — applied</div>`;
       body += '<div class="rules-list" style="margin-top: 12px;">';
-      opt.rules.forEach(r => {
+      (plan ? plan.understood.map((u, i) => ['Understood ' + (i + 1), u]) : opt.rules).forEach(r => {
         body += `<div class="rule-row"><div class="rule-lbl">${r[0]}</div><div class="rule-val">${r[1]}</div></div>`;
       });
       body += '</div></div></div>';
     }
 
     // Preview
-    if (s.preview && s.preview.length) {
+    const previewRows = plan && plan.preview && plan.preview.length ? plan.preview.map(p => [p.before || p.source || "preview", p.after || p.destination || p.reason || "review"]) : s.preview;
+    if (previewRows && previewRows.length) {
       body += '<div class="stage-section">';
       body += '<div class="section-label">Preview</div>';
       body += '<div class="preview-block">';
       body += '<div class="preview-row head"><div>Before</div><div></div><div>After</div></div>';
-      s.preview.forEach(p => {
+      previewRows.forEach(p => {
         body += `<div class="preview-row"><div class="preview-before">${escapeHtml(p[0])}</div><div class="preview-arrow">→</div><div class="preview-after">${escapeHtml(p[1])}</div></div>`;
       });
       body += '</div></div>';
@@ -1005,14 +1042,17 @@ function renderStage(idx) {
       if (triesLeft > 0) {
         body += `<button class="btn" onclick="tryNext(${idx})">Try Option ${letterFor(st.attempt + 1)} →</button>`;
       } else {
-        body += `<button class="btn btn-manual" onclick="goManual(${idx})">No good fit — Go Manual</button>`;
+        body += `<button class="btn btn-manual" onclick="showAskFis(${idx})">No good fit — Ask FIS</button>`;
       }
       body += '</div>';
       body += '<div class="actions-right">';
       body += `<button class="btn btn-ghost" onclick="goAdvanced(${idx})">Open in Advanced Mode</button>`;
       body += '</div></div>';
       if (st.attempt > 0) {
-        body += `<div class="cascade-hint">Showing <strong>Option ${letterFor(st.attempt)}</strong> · ${triesLeft} ${triesLeft === 1 ? 'try' : 'tries'} left before manual</div>`;
+        body += `<div class="cascade-hint">Showing <strong>Option ${letterFor(st.attempt)}</strong> · ${triesLeft} ${triesLeft === 1 ? 'try' : 'tries'} left before Ask FIS</div>`;
+      }
+      if (st.askFis) {
+        body += `<div class="stage-section"><div class="section-label">Ask FIS</div><div class="rec-card" style="border-color: var(--blue); background: linear-gradient(180deg, rgba(96,165,250,.16), rgba(45,212,191,.04));"><div class="rec-card-title" style="color: var(--blue);">Tell File Intelligence System what you want done.</div><textarea id="askFisText-${idx}" class="picker-input" style="width:100%;min-height:96px;margin-top:12px;" placeholder="Do not delete anything. Move uncertain files to review."></textarea><div class="actions"><button class="btn btn-accept" onclick="requestCustomPlan(${idx})">Build Preview Plan</button><button class="btn" onclick="tryNext(${idx})">Try Another Plan</button><button class="btn btn-ghost" onclick="goAdvanced(${idx})">Open Advanced Workbench</button></div></div></div>`;
       }
     } else {
       body += '<div class="reopen-row">';
@@ -1064,7 +1104,7 @@ function updateCommitBar() {
   const summary = document.getElementById('commitSummaryText');
   if (done === total) {
     btn.disabled = false;
-    summary.textContent = 'All stages accepted. Ready to apply changes to disk.';
+    summary.textContent = 'All stages accepted. Ready to simulate the accepted preview-only plan.';
   } else if (done === 0) {
     summary.textContent = 'Working through River\'s recommendations…';
   } else {
@@ -1073,7 +1113,9 @@ function updateCommitBar() {
 }
 
 // ===== Actions =====
-function acceptStage(idx) {
+async function acceptStage(idx) {
+  if (!state[idx].plan) await requestPlan(idx);
+  if (state[idx].plan) acceptedPlanIds.push(state[idx].plan.plan_id);
   state[idx].accepted = true;
   state[idx].status = 'complete';
   state[idx].expanded = false;
@@ -1088,20 +1130,23 @@ function acceptStage(idx) {
   }, 80);
 }
 
-function tryNext(idx) {
+async function tryNext(idx) {
+  state[idx].rejections.push(`attempt_${state[idx].attempt + 1}`);
   if (state[idx].attempt < 2) {
     state[idx].attempt++;
+    await requestPlan(idx);
     render();
+  } else {
+    showAskFis(idx);
   }
 }
+function showAskFis(idx) { state[idx].askFis = true; render(); }
 
 function goManual(idx) {
   alert(`Manual handoff for "${STAGES[idx].name}" — would open the manual review panel. Not wired in this prototype.`);
 }
 
-function goAdvanced(idx) {
-  alert(`Open "${STAGES[idx].name}" in Advanced Mode — exposes rule editor, hash algorithm, protected list, custom keeper logic. Not wired in this prototype.`);
-}
+function goAdvanced(idx) { window.location.href = 'river-fis-3-advanced-mode.html'; }
 
 function toggleExpand(idx) {
   const st = state[idx];
@@ -1130,12 +1175,17 @@ function reopenStage(idx) {
   }, 80);
 }
 
-function executeAll() {
-  alert('Approve & Execute — would run the two-phase commit:\n\n  Phase A: stage operations to .river-staging/<txn_id>/\n  Phase B: atomic rename + send2trash\n  Then: write rollback ledger\n\nNot wired in this prototype.');
+async function executeAll() {
+  const plan_id = acceptedPlanIds[acceptedPlanIds.length - 1];
+  if (!plan_id) return alert('Accept a preview plan first.');
+  try {
+    const sim = await apiPost('/api/simulate', {plan_id});
+    alert(`Simulation complete. Safe to run: ${sim.safe_to_run}\nWould change: ${sim.would_change}\nBlocked: ${sim.blocked.length}\n\nExecution still requires explicit APPROVE and is stubbed preview-only in this pass.`);
+  } catch (err) { alert('Simulate failed: ' + err.message); }
 }
 
 // Initial render
-render();
+requestPlan(0).then(render);
 </script>
 
 </body>

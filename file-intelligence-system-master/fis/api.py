@@ -62,6 +62,12 @@ class FISAPIHandler(BaseHTTPRequestHandler):
             codes = get_subject_codes(domain)
             self._json_response({"codes": codes})
 
+        elif path.startswith("/api/scan/"):
+            from fis.planner.scan_summary import get_scan
+            scan_id = path.rsplit("/", 1)[-1]
+            scan = get_scan(scan_id)
+            self._json_response(scan if scan else {"error": "scan not found"}, 200 if scan else 404)
+
         elif path == "/bil/export":
             bil = self.get_bil()
             export_path = bil.export_daily()
@@ -76,7 +82,55 @@ class FISAPIHandler(BaseHTTPRequestHandler):
         path = urlparse(self.path).path
         body = self._read_body()
 
-        if path == "/classify":
+        if path == "/api/scan":
+            from fis.planner.scan_summary import scan_path
+            root = body.get("path")
+            if not root:
+                self._json_response({"error": "path required"}, 400)
+                return
+            try:
+                self._json_response(scan_path(root))
+            except FileNotFoundError:
+                self._json_response({"error": f"path not found: {root}"}, 404)
+
+        elif path == "/api/plan/simple":
+            from fis.planner.simple_strategies import build_simple_plan
+            try:
+                self._json_response(build_simple_plan(body.get("scan_id"), body.get("stage", "file_cleaner"), body.get("attempt", 1), body.get("previous_rejections", [])))
+            except KeyError:
+                self._json_response({"error": "scan not found"}, 404)
+
+        elif path == "/api/plan/custom":
+            from fis.planner.custom_intent import build_custom_plan
+            try:
+                self._json_response(build_custom_plan(body.get("scan_id"), body.get("stage", "file_cleaner"), body.get("user_request", ""), body.get("previous_rejections", [])))
+            except KeyError:
+                self._json_response({"error": "scan not found"}, 404)
+
+        elif path == "/api/plan/advanced":
+            from fis.planner.simple_strategies import PLANS
+            from fis.planner.safety_rules import validate_plan
+            from uuid import uuid4
+            plan = {"plan_id": str(uuid4()), "mode": "advanced_workbench", "stage": body.get("stage", "advanced"), "actions": body.get("actions", []), "warnings": [], "preview": [], "safety": "preview_only", "requires_user_approval": True}
+            plan = validate_plan(plan, "advanced_workbench")
+            PLANS[plan["plan_id"]] = plan
+            self._json_response(plan)
+
+        elif path == "/api/simulate":
+            from fis.planner.simulator import simulate_plan
+            try:
+                self._json_response(simulate_plan(body.get("plan_id")))
+            except KeyError:
+                self._json_response({"error": "plan not found"}, 404)
+
+        elif path == "/api/execute":
+            from fis.planner.executor import execute_plan
+            try:
+                self._json_response(execute_plan(body.get("plan_id"), body.get("confirmation")))
+            except KeyError:
+                self._json_response({"error": "plan not found"}, 404)
+
+        elif path == "/classify":
             # Classify a file by path
             file_path = body.get("path")
             if not file_path:
