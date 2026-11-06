@@ -186,8 +186,45 @@ def shingle(text: str, k: int = 5) -> set[str]:
     return {' '.join(words[i:i+k]) for i in range(len(words) - k + 1)}
 
 
+# ── Optional Rust accelerator (rust/fis_minhash). Falls back to Python silently. ──
+
+def _rust_minhash_exe() -> Optional[Path]:
+    if os.environ.get("FIS_DISABLE_RUST") == "1":
+        return None
+    base = Path(__file__).resolve().parent / "rust" / "fis_minhash" / "target" / "release"
+    for name in ("fis_minhash.exe", "fis_minhash"):
+        if (base / name).is_file():
+            return base / name
+    return None
+
+
+def minhash_signatures_batch(shingle_sets: list[set[str]], num_hashes: int = 128) -> list[list[int]]:
+    """MinHash many documents at once; uses Rust if built, else Python. Identical output."""
+    exe = _rust_minhash_exe()
+    if exe and shingle_sets:
+        import subprocess
+        payload = [str(num_hashes)]
+        for sh in shingle_sets:
+            payload.append("#DOC")
+            payload.extend(sorted(sh))
+        try:
+            out = subprocess.run([str(exe)], input="\n".join(payload) + "\n",
+                                 capture_output=True, text=True, encoding="utf-8",
+                                 timeout=600, check=True).stdout.splitlines()
+            if len(out) == len(shingle_sets):
+                return [[int(v) for v in line.split()] for line in out]
+        except Exception:
+            pass
+    return [_minhash_signature_py(sh, num_hashes) for sh in shingle_sets]
+
+
 def minhash_signature(shingles: set[str], num_hashes: int = 128) -> list[int]:
-    """Generate MinHash signature for a set of shingles."""
+    """Generate MinHash signature for a set of shingles (Rust-accelerated when available)."""
+    return minhash_signatures_batch([shingles], num_hashes)[0]
+
+
+def _minhash_signature_py(shingles: set[str], num_hashes: int = 128) -> list[int]:
+    """Reference Python MinHash."""
     max_hash = 2**128 - 1
     if not shingles:
         return [max_hash] * num_hashes
